@@ -1,6 +1,6 @@
 # SuperGlue第三方训练代码学习笔记
 
-在这个笔记中，我将对SuperGlue第三方训练代码进行梳理。弄清楚这个第三方SuperGlue训练代码的结构和功能。代码地址参见<a href="https://github.com/HeatherJiaZG/SuperGlue-pytorch" target="_blank">这里</a>
+在这个笔记中，我将对SuperGlue第三方训练代码进行梳理。弄清楚这个第三方SuperGlue训练代码的结构和功能。代码地址参见[这里](https://github.com/HeatherJiaZG/SuperGlue-pytorch)
 
 ## 环境配置
 我在Linux终端里，运行下述查看CentOS系统版本的命令：
@@ -690,6 +690,9 @@ len(train_loader)： 82783
 train_loader： <torch.utils.data.dataloader.DataLoader object at 0x7fe11fb47af0>
 ----------------------结束监视代码----------------------
 ```
+
+<div id="train_DataLoader_diedai"></div>
+
 由于`<class 'torch.utils.data.dataloader.DataLoader'>`类实现了`__iter__`方法，因此DataLoader对象是一个可迭代对象。我们试着迭代一下DataLoader对象看看效果。测试下述的代码：
 ``` python
 # load training data
@@ -1603,9 +1606,9 @@ Parameter Group 0
 ```
 原来如此，优化器居然是长这个样子的。当把优化器print出来之后，我们可以看到，优化器里面包含了优化器的名字（在我这里是`Adam`）以及优化器包含的各种参数。这些参数的详细含义，我目前还不清楚。如果有需要的话，可能以后会去读读论文，了解一下都有哪些优化器以及他们的作用吧。目前，我暂且先专注在提高代码工程能力上，所以对于优化器的设计细节，我暂且先不深入研究。
 
-下面，我们终于进入了正式训练的部分。剩下的所有代码，就都是正式训练的部分了。下面的代码如下：
+下面，我们终于进入了正式训练的部分。下面就是`/SuperGlue-pytorch/train.py`脚本剩下的所有代码了：
 ``` python
-# start training
+# start training 在这部分训练正式开始
 for epoch in range(1, opt.epoch + 1):
     epoch_loss = 0
     superglue.double().train()
@@ -1712,4 +1715,345 @@ for epoch in range(1, opt.epoch + 1):
             epoch, opt.epoch, epoch_loss, model_out_path
         )
     )
+```
+首先，在正式训练开始的部分，我们看到了这样的两行代码：
+``` python
+for epoch in range(1, opt.epoch + 1):
+    epoch_loss = 0
+    superglue.double().train()
+```
+这两行代码的第一行是设定了这个epoch的loss。第二行代码的作用是将模型`superglue`的所有浮点参数转换成双精度实型数double数据类型，并把模型调整为训练模式。这里我们要注意：`superglue`模型调用的`double()`和`train()`函数，都是`/mnt/data-2/data/zitong.yin/conda_env/superglue/lib/python3.8/site-packages/torch/nn/modules/module.py`文件的`class Module:`类的函数，意即，这两个函数都是PyTorch官方规定的模型必须具有的函数。参考[PyTorch官方torch.nn.Module类的文档](https://pytorch.org/docs/stable/generated/torch.nn.Module.html)
+
+下面的代码是一个循环遍历了所有训练数据的for循环：
+``` python
+for i, pred in enumerate(train_loader):
+    for k in pred:
+        if k != "file_name" and k != "image0" and k != "image1":
+            if type(pred[k]) == torch.Tensor:
+                pred[k] = Variable(pred[k].cuda())
+            else:
+                pred[k] = Variable(torch.stack(pred[k]).cuda())
+
+    data = superglue(pred)
+    for k, v in pred.items():
+        pred[k] = v[0]
+    pred = {**pred, **data}
+
+    if pred["skip_train"] == True:  # image has no keypoint
+        continue
+
+    # process loss
+    Loss = pred["loss"]
+    epoch_loss += Loss.item()
+    mean_loss.append(Loss)
+
+    superglue.zero_grad()
+    Loss.backward()
+    optimizer.step()
+
+    # for every 50 images, print progress and visualize the matches
+    if (i + 1) % 50 == 0:
+        print(
+            "Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}".format(
+                epoch,
+                opt.epoch,
+                i + 1,
+                len(train_loader),
+                torch.mean(torch.stack(mean_loss)).item(),
+            )
+        )
+        mean_loss = []
+
+        ### eval ###
+        # Visualize the matches.
+        superglue.eval()
+        image0, image1 = (
+            pred["image0"].cpu().numpy()[0] * 255.0,
+            pred["image1"].cpu().numpy()[0] * 255.0,
+        )
+        kpts0, kpts1 = (
+            pred["keypoints0"].cpu().numpy()[0],
+            pred["keypoints1"].cpu().numpy()[0],
+        )
+        matches, conf = (
+            pred["matches0"].cpu().detach().numpy(),
+            pred["matching_scores0"].cpu().detach().numpy(),
+        )
+        image0 = read_image_modified(image0, opt.resize, opt.resize_float)
+        image1 = read_image_modified(image1, opt.resize, opt.resize_float)
+        valid = matches > -1
+        mkpts0 = kpts0[valid]
+        mkpts1 = kpts1[matches[valid]]
+        mconf = conf[valid]
+        viz_path = eval_output_dir / "{}_matches.{}".format(
+            str(i), opt.viz_extension
+        )
+        color = cm.jet(mconf)
+        stem = pred["file_name"]
+        text = []
+
+        make_matching_plot(
+            image0,
+            image1,
+            kpts0,
+            kpts1,
+            mkpts0,
+            mkpts1,
+            color,
+            text,
+            viz_path,
+            stem,
+            stem,
+            opt.show_keypoints,
+            opt.fast_viz,
+            opt.opencv_display,
+            "Matches",
+        )
+
+    # process checkpoint for every 5e3 images
+    if (i + 1) % 5e3 == 0:
+        model_out_path = "model_epoch_{}.pth".format(epoch)
+        torch.save(superglue, model_out_path)
+        print(
+            "Epoch [{}/{}], Step [{}/{}], Checkpoint saved to {}".format(
+                epoch, opt.epoch, i + 1, len(train_loader), model_out_path
+            )
+        )
+```
+注意，通过这份代码的学习，我是要学习训练脚本的编写的，所以要特别留意，这里是怎么循环遍历训练数据的。我们可以看到，循环遍历训练数据是在`for i, pred in enumerate(train_loader):`这句话完成的。这里，对训练用DataLoader进行了枚举，枚举变量是一个指标`i`和一个`pred`。这里涉及到Python自带函数`enumerate()`的用法。我先看看这个函数的用法。在一个空白脚本里，测试如下代码：
+``` python
+seasons = ["Spring", "Summer", "Fall", "Winter"]
+
+for i, pred in enumerate(seasons, start=1):
+    print(f"第{i}个枚举变量是：", pred)
+```
+结果为：
+```
+第1个枚举变量是： Spring
+第2个枚举变量是： Summer
+第3个枚举变量是： Fall
+第4个枚举变量是： Winter
+```
+参考[Python官方文档enumerate()函数的解释](https://docs.python.org/3.8/library/functions.html#enumerate)，就完全清楚了。Python自带的`enumerate()`函数，其实就是对一个可迭代对象进行迭代。只不过，附带上了一个序号而已。所以，上面SuperGlue-pytorch训练脚本里的`for i, pred in enumerate(train_loader):`这句话里的pred，其实就是在对`train_loader`进行遍历迭代。按照[之前对`train_loader`进行遍历迭代的结果](#train_DataLoader_diedai)，可以看到，`train_loader`是一个可迭代对象，当迭代里面的元素时，得到的是一个字典。这个字典里面的键和键所对应的值之前已经print出来了，就是下面的这些：
+```
+train_loader里的第1个元素的类型： <class 'dict'>
+train_loader里的第1个元素的键 keypoints0 所对应的值的类型是：<class 'list'>
+train_loader里的第1个元素的键 keypoints1 所对应的值的类型是：<class 'list'>
+train_loader里的第1个元素的键 descriptors0 所对应的值的类型是：<class 'list'>
+train_loader里的第1个元素的键 descriptors1 所对应的值的类型是：<class 'list'>
+train_loader里的第1个元素的键 scores0 所对应的值的类型是：<class 'list'>
+train_loader里的第1个元素的键 scores1 所对应的值的类型是：<class 'list'>
+train_loader里的第1个元素的键 image0 所对应的值的类型是：<class 'torch.Tensor'>
+train_loader里的第1个元素的键 image1 所对应的值的类型是：<class 'torch.Tensor'>
+train_loader里的第1个元素的键 all_matches 所对应的值的类型是：<class 'list'>
+train_loader里的第1个元素的键 file_name 所对应的值的类型是：<class 'list'>
+```
+下面的代码是对`train_loader`中的数据进行一个数据格式的重构。我们上面已经看到了，`train_loader`中很多键所对应的值的类型是`list`。`list`数据类型不适合于后面的操作。所以需要把`list`数据类型转换成`torch.tensor`数据类型。测试下面的代码：
+``` python
+# start training
+for epoch in range(1, opt.epoch + 1):
+    epoch_loss = 0
+    superglue.double().train()
+    for i, pred in enumerate(train_loader):
+        temp = 1
+        for k in pred.keys():
+            if k != "file_name" and k != "image0" and k != "image1":
+                if type(pred[k]) == torch.Tensor:
+                    pred[k] = pred[k].cuda()
+                    print("执行了这里")
+                else:
+                    print(
+                        f"----------------------第{temp}个键开始----------------------"
+                    )
+                    print("len(pred[k])：", len(pred[k]))
+                    print("修改前的pred[k][0].shape：", pred[k][0].shape)
+                    print(
+                        f"----------------------第{temp}个分割线----------------------"
+                    )
+                    pred[k] = torch.stack(pred[k]).cuda()
+                    print("修改后的pred[k].shape：", pred[k].shape)
+                    print(
+                        f"----------------------第{temp}个键结束----------------------\n"
+                    )
+                    temp += 1
+        exit()
+```
+结果为：
+```
+----------------------第1个键开始----------------------
+len(pred[k])： 1
+修改前的pred[k][0].shape： torch.Size([1, 389, 2])
+----------------------第1个分割线----------------------
+修改后的pred[k].shape： torch.Size([1, 1, 389, 2])
+----------------------第1个键结束----------------------
+
+----------------------第2个键开始----------------------
+len(pred[k])： 1
+修改前的pred[k][0].shape： torch.Size([1, 163, 2])
+----------------------第2个分割线----------------------
+修改后的pred[k].shape： torch.Size([1, 1, 163, 2])
+----------------------第2个键结束----------------------
+
+----------------------第3个键开始----------------------
+len(pred[k])： 128
+修改前的pred[k][0].shape： torch.Size([1, 389])
+----------------------第3个分割线----------------------
+修改后的pred[k].shape： torch.Size([128, 1, 389])
+----------------------第3个键结束----------------------
+
+----------------------第4个键开始----------------------
+len(pred[k])： 128
+修改前的pred[k][0].shape： torch.Size([1, 163])
+----------------------第4个分割线----------------------
+修改后的pred[k].shape： torch.Size([128, 1, 163])
+----------------------第4个键结束----------------------
+
+----------------------第5个键开始----------------------
+len(pred[k])： 389
+修改前的pred[k][0].shape： torch.Size([1])
+----------------------第5个分割线----------------------
+修改后的pred[k].shape： torch.Size([389, 1])
+----------------------第5个键结束----------------------
+
+----------------------第6个键开始----------------------
+len(pred[k])： 163
+修改前的pred[k][0].shape： torch.Size([1])
+----------------------第6个分割线----------------------
+修改后的pred[k].shape： torch.Size([163, 1])
+----------------------第6个键结束----------------------
+
+----------------------第7个键开始----------------------
+len(pred[k])： 2
+修改前的pred[k][0].shape： torch.Size([1, 485])
+----------------------第7个分割线----------------------
+修改后的pred[k].shape： torch.Size([2, 1, 485])
+----------------------第7个键结束----------------------
+```
+上面的这段代码是在做这样一件事：对`train_loader`的`file_name`，`image0`和`image1`这三个键所对应的值不做任何修改。对`train_loader`的剩下的键，如果它所对应的值已经是`torch.Tensor`数据类型了，则就不再更改了；如果它所对应的值不是`torch.Tensor`数据类型（则一定是`list`数据类型），则利用`pred[k] = torch.stack(pred[k]).cuda()`这行代码把它所对应的值堆叠后转换成`torch.Tensor`数据类型。这里用到的关键函数`torch.stack`的用法参见[这里](https://pytorch.org/docs/stable/generated/torch.stack.html)。从上面print出来的结果里也能很显然地看出，`torch.stack`可以把很多**维度相同**的张量在一个新的维度上拼接起来，形成一个新的张量。
+
+下面的一行代码就是把训练数据输入到模型里面去进行推理的代码：
+``` python
+data = superglue(pred)
+```
+我们先来看一下输入模型中的数据。测试如下的代码：
+``` python
+print("----------------------开始监视代码----------------------")
+print("pred的类型是：", type(pred))
+for key in pred.keys():
+    print(f"字典pred的键 {key} 所对应的值的类型是：", type(pred[key]))
+print("----------------------结束监视代码----------------------")
+exit()
+data = superglue(pred)
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+pred的类型是： <class 'dict'>
+字典pred的键 keypoints0 所对应的值的类型是： <class 'torch.Tensor'>
+字典pred的键 keypoints1 所对应的值的类型是： <class 'torch.Tensor'>
+字典pred的键 descriptors0 所对应的值的类型是： <class 'torch.Tensor'>
+字典pred的键 descriptors1 所对应的值的类型是： <class 'torch.Tensor'>
+字典pred的键 scores0 所对应的值的类型是： <class 'torch.Tensor'>
+字典pred的键 scores1 所对应的值的类型是： <class 'torch.Tensor'>
+字典pred的键 image0 所对应的值的类型是： <class 'torch.Tensor'>
+字典pred的键 image1 所对应的值的类型是： <class 'torch.Tensor'>
+字典pred的键 all_matches 所对应的值的类型是： <class 'torch.Tensor'>
+字典pred的键 file_name 所对应的值的类型是： <class 'list'>
+----------------------结束监视代码----------------------
+```
+可以看到，除了最后一个文件名以外，其他的数据都被转换成了`<class 'torch.Tensor'>`类型了。我们看看经过模型推理后的数据长什么样子。测试下述代码：
+``` python
+data = superglue(pred)
+print("----------------------开始监视代码----------------------")
+print("data的类型是：", type(data))
+print("----------------------我的分割线1----------------------")
+for key in data.keys():
+    print(f"字典data的键 {key} 所对应的值是：", data[key])
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+data的类型是： <class 'dict'>
+----------------------我的分割线1----------------------
+字典data的键 matches0 所对应的值是： tensor([-1, -1, -1, -1, -1, -1,  0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 16, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, 28, -1, -1, -1, -1, -1, -1, 24], device='cuda:0')
+字典data的键 matches1 所对应的值是： tensor([  6,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+         -1,  -1, 335,  -1,  -1,  -1,  -1,  -1,  -1,  -1, 388,  -1,  -1,  -1,
+        381,  -1], device='cuda:0')
+字典data的键 matching_scores0 所对应的值是： tensor([0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.5553, 0.0000, 0.0000,
+        0.0000, 0.1397, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0942, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0608, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0404, 0.0000, 0.0000, 0.1216, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0367, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0423, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0624, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0402, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.2151, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.1645, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.4336, 0.0000, 0.0000, 0.0000, 0.0000, 0.1178,
+        0.0000, 0.4487], device='cuda:0', dtype=torch.float64,
+       grad_fn=<SelectBackward0>)
+字典data的键 matching_scores1 所对应的值是： tensor([0.5553, 0.0000, 0.1397, 0.0000, 0.0000, 0.0423, 0.0942, 0.0404, 0.0000,
+        0.0000, 0.0000, 0.1216, 0.0608, 0.0000, 0.0000, 0.0367, 0.2151, 0.0402,
+        0.0000, 0.0624, 0.0000, 0.0000, 0.0000, 0.0000, 0.4487, 0.1178, 0.1645,
+        0.0000, 0.4336, 0.0000], device='cuda:0', dtype=torch.float64,
+       grad_fn=<SelectBackward0>)
+字典data的键 loss 所对应的值是： tensor([0.7299], device='cuda:0', dtype=torch.float64,
+       grad_fn=<SelectBackward0>)
+字典data的键 skip_train 所对应的值是： False
+----------------------结束监视代码----------------------
 ```
