@@ -1,6 +1,6 @@
 # SuperGlue第三方训练代码学习笔记
 
-在这个笔记中，我将对SuperGlue第三方训练代码进行梳理。弄清楚这个第三方SuperGlue训练代码的结构和功能。代码地址参见[这里](https://github.com/HeatherJiaZG/SuperGlue-pytorch)
+在这个笔记中，我将对SuperGlue第三方训练代码进行梳理。弄清楚这个第三方SuperGlue训练代码的结构和功能。代码地址参见<a href="https://github.com/HeatherJiaZG/SuperGlue-pytorch" target="_blank">这里</a>
 
 ## 环境配置
 我在Linux终端里，运行下述查看CentOS系统版本的命令：
@@ -1108,3 +1108,608 @@ superglue： SuperGlue(
 ----------------------结束监视代码----------------------
 ```
 至此，我所使用的SuperGlue网络终于展现出了它的完整结构。关于这个网络结构，之后再来详细地研究。现在，我们先继续分析下面的训练代码。
+
+接下来的代码设置了模型训练的方式为GPU训练：
+``` python
+if torch.cuda.is_available():
+    superglue.cuda()  # make sure it trains on GPU
+else:
+    print("### CUDA not available ###")
+```
+由于我的调试是在开发机上进行的，所以显然是在GPU上训练的。经过测试，并没有print出来`### CUDA not available ###`这句话，因此这两行代码其实没有什么好说的。
+
+下面的代码构造了一个优化器和平均loss的列表：
+``` python
+optimizer = torch.optim.Adam(superglue.parameters(), lr=opt.learning_rate)
+mean_loss = []
+```
+优化器是神经网络的训练中必须要使用的。关于PyTorch优化器的教程，可以参看[PYTORCH: OPTIM的一个简单例子](https://pytorch.org/tutorials/beginner/examples_nn/two_layer_net_optim.html)或者[OPTIMIZING MODEL PARAMETERS教程](https://pytorch.org/tutorials/beginner/basics/optimization_tutorial.html)，也可参看[PyTorch优化器文档](https://pytorch.org/docs/stable/optim.html)。在这里，我们只需要知道，初始化一个优化器需要提供哪些参数以及优化器长什么样子就行了。关于优化器的详细用法，之后进入到下面的代码中时会继续深入分析的。
+我们先来测试一下下述代码：
+``` python
+print("----------------------开始监视代码----------------------")
+print("type(superglue.parameters())：", type(superglue.parameters()))
+print("----------------------我的分割线1----------------------")
+print("superglue.parameters()：", superglue.parameters())
+print("----------------------结束监视代码----------------------")
+exit()
+optimizer = torch.optim.Adam(superglue.parameters(), lr=opt.learning_rate)
+mean_loss = []
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(superglue.parameters())： <class 'generator'>
+----------------------我的分割线1----------------------
+superglue.parameters()： <generator object Module.parameters at 0x7f632577b820>
+----------------------结束监视代码----------------------
+```
+单纯这样看，我们似乎看不出来什么东西。我们利用vscode的定义跳转功能，进入到这个`superglue.parameters()`函数的里面看一下它的定义：
+``` python
+# superglue.parameters()函数的定义，位于/mnt/data-2/data/zitong.yin/conda_env/superglue/lib/python3.8/site-packages/torch/nn/modules/module.py文件里
+
+def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
+    r"""Returns an iterator over module parameters.
+
+    This is typically passed to an optimizer.
+
+    Args:
+        recurse (bool): if True, then yields parameters of this module
+            and all submodules. Otherwise, yields only parameters that
+            are direct members of this module.
+
+    Yields:
+        Parameter: module parameter
+
+    Example::
+
+        >>> for param in model.parameters():
+        >>>     print(type(param), param.size())
+        <class 'torch.Tensor'> (20L,)
+        <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
+
+    """
+    for name, param in self.named_parameters(recurse=recurse):
+        yield param
+```
+从这里看，我们就明白了。`superglue.parameters()`函数返回一个模型参数的迭代器，而这个模型参数的迭代器通常会被传递给优化器的构造函数用来初始化优化器（参考[这个教程](https://pytorch.org/tutorials/beginner/examples_nn/two_layer_net_optim.html)）。我们试着迭代一下这个模型参数的迭代器。测试下述代码：
+``` python
+print("----------------------开始监视代码----------------------")
+print("type(superglue.parameters())：", type(superglue.parameters()))
+print("----------------------我的分割线1----------------------")
+print("superglue.parameters()：", superglue.parameters())
+print("----------------------我的分割线2----------------------")
+print(
+    "isinstance(superglue.parameters(), Generator)：",
+    isinstance(superglue.parameters(), Generator),
+)
+print("----------------------我的分割线3----------------------")
+temp_1 = 1
+for i in superglue.parameters():
+    print(f"superglue.parameters()中的第{temp_1}个参数的类型是：", type(i))
+    temp_1 += 1
+print("----------------------我的分割线4----------------------")
+temp_2 = 1
+for j in superglue.parameters():
+    print(f"superglue.parameters()中的第{temp_2}个参数是：", j)
+    temp_2 += 1
+    if temp_2 == 4:
+        break
+print("----------------------结束监视代码----------------------")
+exit()
+optimizer = torch.optim.Adam(superglue.parameters(), lr=opt.learning_rate)
+mean_loss = []
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(superglue.parameters())： <class 'generator'>
+----------------------我的分割线1----------------------
+superglue.parameters()： <generator object Module.parameters at 0x7f7914951890>
+----------------------我的分割线2----------------------
+isinstance(superglue.parameters(), Generator)： True
+----------------------我的分割线3----------------------
+superglue.parameters()中的第1个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第2个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第3个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第4个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第5个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第6个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第7个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第8个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第9个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第10个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第11个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第12个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第13个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第14个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第15个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第16个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第17个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第18个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第19个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第20个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第21个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第22个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第23个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第24个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第25个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第26个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第27个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第28个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第29个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第30个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第31个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第32个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第33个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第34个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第35个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第36个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第37个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第38个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第39个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第40个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第41个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第42个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第43个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第44个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第45个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第46个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第47个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第48个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第49个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第50个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第51个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第52个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第53个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第54个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第55个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第56个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第57个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第58个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第59个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第60个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第61个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第62个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第63个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第64个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第65个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第66个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第67个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第68个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第69个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第70个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第71个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第72个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第73个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第74个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第75个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第76个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第77个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第78个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第79个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第80个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第81个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第82个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第83个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第84个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第85个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第86个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第87个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第88个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第89个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第90个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第91个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第92个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第93个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第94个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第95个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第96个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第97个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第98个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第99个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第100个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第101个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第102个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第103个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第104个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第105个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第106个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第107个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第108个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第109个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第110个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第111个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第112个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第113个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第114个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第115个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第116个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第117个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第118个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第119个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第120个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第121个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第122个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第123个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第124个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第125个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第126个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第127个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第128个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第129个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第130个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第131个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第132个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第133个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第134个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第135个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第136个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第137个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第138个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第139个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第140个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第141个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第142个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第143个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第144个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第145个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第146个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第147个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第148个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第149个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第150个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第151个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第152个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第153个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第154个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第155个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第156个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第157个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第158个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第159个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第160个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第161个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第162个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第163个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第164个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第165个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第166个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第167个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第168个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第169个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第170个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第171个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第172个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第173个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第174个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第175个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第176个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第177个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第178个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第179个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第180个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第181个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第182个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第183个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第184个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第185个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第186个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第187个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第188个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第189个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第190个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第191个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第192个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第193个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第194个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第195个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第196个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第197个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第198个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第199个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第200个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第201个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第202个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第203个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第204个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第205个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第206个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第207个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第208个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第209个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第210个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第211个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第212个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第213个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第214个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第215个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第216个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第217个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第218个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第219个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第220个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第221个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第222个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第223个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第224个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第225个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第226个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+superglue.parameters()中的第227个参数的类型是： <class 'torch.nn.parameter.Parameter'>
+----------------------我的分割线4----------------------
+superglue.parameters()中的第1个参数是： Parameter containing:
+tensor(1., device='cuda:0', requires_grad=True)
+superglue.parameters()中的第2个参数是： Parameter containing:
+tensor([[[-0.1948],
+         [-0.3589],
+         [-0.0879]],
+
+        [[ 0.4845],
+         [ 0.5442],
+         [-0.3898]],
+
+        [[-0.0350],
+         [-0.4070],
+         [-0.3277]],
+
+        [[-0.3535],
+         [-0.3371],
+         [ 0.5733]],
+
+        [[ 0.5009],
+         [-0.2826],
+         [-0.5263]],
+
+        [[ 0.0820],
+         [ 0.1446],
+         [-0.2046]],
+
+        [[ 0.5742],
+         [-0.1971],
+         [ 0.0546]],
+
+        [[ 0.4568],
+         [-0.3885],
+         [-0.0119]],
+
+        [[ 0.1558],
+         [ 0.1578],
+         [ 0.5255]],
+
+        [[ 0.0391],
+         [ 0.3348],
+         [ 0.0443]],
+
+        [[ 0.5338],
+         [ 0.4946],
+         [ 0.5081]],
+
+        [[ 0.3786],
+         [ 0.2134],
+         [ 0.2121]],
+
+        [[ 0.2738],
+         [ 0.3530],
+         [ 0.0957]],
+
+        [[ 0.1592],
+         [-0.0684],
+         [-0.2240]],
+
+        [[ 0.1961],
+         [-0.5182],
+         [-0.4093]],
+
+        [[-0.3641],
+         [ 0.4289],
+         [ 0.0757]],
+
+        [[-0.2434],
+         [ 0.1924],
+         [-0.2685]],
+
+        [[ 0.5094],
+         [ 0.4531],
+         [ 0.1083]],
+
+        [[-0.5599],
+         [ 0.2272],
+         [ 0.1881]],
+
+        [[-0.1274],
+         [-0.0564],
+         [ 0.2718]],
+
+        [[ 0.1801],
+         [-0.4029],
+         [ 0.2975]],
+
+        [[ 0.4354],
+         [ 0.3177],
+         [-0.3558]],
+
+        [[ 0.5423],
+         [-0.0809],
+         [ 0.4017]],
+
+        [[-0.0378],
+         [-0.0253],
+         [ 0.1949]],
+
+        [[ 0.3115],
+         [ 0.2656],
+         [ 0.0722]],
+
+        [[-0.0941],
+         [-0.2266],
+         [-0.4042]],
+
+        [[ 0.2118],
+         [-0.0269],
+         [-0.5650]],
+
+        [[-0.3973],
+         [-0.5037],
+         [ 0.0301]],
+
+        [[-0.1902],
+         [-0.4390],
+         [-0.2855]],
+
+        [[ 0.3776],
+         [-0.3351],
+         [ 0.1666]],
+
+        [[ 0.1841],
+         [-0.0898],
+         [ 0.3376]],
+
+        [[-0.0060],
+         [ 0.2526],
+         [-0.1010]]], device='cuda:0', requires_grad=True)
+superglue.parameters()中的第3个参数是： Parameter containing:
+tensor([-0.4749,  0.1358, -0.2101,  0.5600, -0.3274,  0.2971, -0.3640,  0.4130,
+        -0.1853,  0.3061, -0.1347, -0.0546,  0.4334,  0.2403, -0.5243,  0.3647,
+        -0.2911,  0.0924,  0.1600, -0.5440, -0.4733,  0.3589, -0.1496,  0.4431,
+        -0.1292, -0.2198,  0.2057,  0.1433,  0.3471, -0.4147, -0.2773, -0.4146],
+       device='cuda:0', requires_grad=True)
+----------------------结束监视代码----------------------
+```
+至此，我们已经很清楚地看到了传给优化器`torch.optim.Adam`类的构造函数的参数究竟长什么样子。传给优化器`torch.optim.Adam`类的构造函数的神经网络参数对象是一个生成器（`isinstance(superglue.parameters(), Generator)： True`），这个生成器是一个可迭代对象，里面保存了神经网络的各个层的参数。这些参数都是一些PyTorch的张量。**在之后的训练中，就会由这个优化器对象来更新神经网络的参数。**（关于PyTorch优化器的使用，**请务必仔细阅读[这里的教程](https://pytorch.org/tutorials/beginner/examples_nn/two_layer_net_optim.html)**，并把这份教程里的代码自己跑一跑试一试。这份教程写得极为清楚。）
+
+下面我们来看看优化器对象长什么样子。测试如下的代码：
+``` python
+optimizer = torch.optim.Adam(superglue.parameters(), lr=opt.learning_rate)
+print("----------------------开始监视代码----------------------")
+print("type(optimizer)：", type(optimizer))
+print("----------------------我的分割线1----------------------")
+print("optimizer：", optimizer)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(optimizer)： <class 'torch.optim.adam.Adam'>
+----------------------我的分割线1----------------------
+optimizer： Adam (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    eps: 1e-08
+    lr: 0.0001
+    weight_decay: 0
+)
+----------------------结束监视代码----------------------
+```
+原来如此，优化器居然是长这个样子的。当把优化器print出来之后，我们可以看到，优化器里面包含了优化器的名字（在我这里是`Adam`）以及优化器包含的各种参数。这些参数的详细含义，我目前还不清楚。如果有需要的话，可能以后会去读读论文，了解一下都有哪些优化器以及他们的作用吧。目前，我暂且先专注在提高代码工程能力上，所以对于优化器的设计细节，我暂且先不深入研究。
+
+下面，我们终于进入了正式训练的部分。剩下的所有代码，就都是正式训练的部分了。下面的代码如下：
+``` python
+# start training
+for epoch in range(1, opt.epoch + 1):
+    epoch_loss = 0
+    superglue.double().train()
+    for i, pred in enumerate(train_loader):
+        for k in pred:
+            if k != "file_name" and k != "image0" and k != "image1":
+                if type(pred[k]) == torch.Tensor:
+                    pred[k] = Variable(pred[k].cuda())
+                else:
+                    pred[k] = Variable(torch.stack(pred[k]).cuda())
+
+        data = superglue(pred)
+        for k, v in pred.items():
+            pred[k] = v[0]
+        pred = {**pred, **data}
+
+        if pred["skip_train"] == True:  # image has no keypoint
+            continue
+
+        # process loss
+        Loss = pred["loss"]
+        epoch_loss += Loss.item()
+        mean_loss.append(Loss)
+
+        superglue.zero_grad()
+        Loss.backward()
+        optimizer.step()
+
+        # for every 50 images, print progress and visualize the matches
+        if (i + 1) % 50 == 0:
+            print(
+                "Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}".format(
+                    epoch,
+                    opt.epoch,
+                    i + 1,
+                    len(train_loader),
+                    torch.mean(torch.stack(mean_loss)).item(),
+                )
+            )
+            mean_loss = []
+
+            ### eval ###
+            # Visualize the matches.
+            superglue.eval()
+            image0, image1 = (
+                pred["image0"].cpu().numpy()[0] * 255.0,
+                pred["image1"].cpu().numpy()[0] * 255.0,
+            )
+            kpts0, kpts1 = (
+                pred["keypoints0"].cpu().numpy()[0],
+                pred["keypoints1"].cpu().numpy()[0],
+            )
+            matches, conf = (
+                pred["matches0"].cpu().detach().numpy(),
+                pred["matching_scores0"].cpu().detach().numpy(),
+            )
+            image0 = read_image_modified(image0, opt.resize, opt.resize_float)
+            image1 = read_image_modified(image1, opt.resize, opt.resize_float)
+            valid = matches > -1
+            mkpts0 = kpts0[valid]
+            mkpts1 = kpts1[matches[valid]]
+            mconf = conf[valid]
+            viz_path = eval_output_dir / "{}_matches.{}".format(
+                str(i), opt.viz_extension
+            )
+            color = cm.jet(mconf)
+            stem = pred["file_name"]
+            text = []
+
+            make_matching_plot(
+                image0,
+                image1,
+                kpts0,
+                kpts1,
+                mkpts0,
+                mkpts1,
+                color,
+                text,
+                viz_path,
+                stem,
+                stem,
+                opt.show_keypoints,
+                opt.fast_viz,
+                opt.opencv_display,
+                "Matches",
+            )
+
+        # process checkpoint for every 5e3 images
+        if (i + 1) % 5e3 == 0:
+            model_out_path = "model_epoch_{}.pth".format(epoch)
+            torch.save(superglue, model_out_path)
+            print(
+                "Epoch [{}/{}], Step [{}/{}], Checkpoint saved to {}".format(
+                    epoch, opt.epoch, i + 1, len(train_loader), model_out_path
+                )
+            )
+
+    # save checkpoint when an epoch finishes
+    epoch_loss /= len(train_loader)
+    model_out_path = "model_epoch_{}.pth".format(epoch)
+    torch.save(superglue, model_out_path)
+    print(
+        "Epoch [{}/{}] done. Epoch Loss {}. Checkpoint saved to {}".format(
+            epoch, opt.epoch, epoch_loss, model_out_path
+        )
+    )
+```
