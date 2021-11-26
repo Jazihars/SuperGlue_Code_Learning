@@ -3130,4 +3130,121 @@ pred： {'keypoints0': tensor([[[  3.8799, 324.7194],
        grad_fn=<SelectBackward0>), 'skip_train': False}
 ----------------------结束监视代码----------------------
 ```
-可以看到，
+可以看到，经过`pred = {**pred, **data}`这行代码，`pred`字典就变成原先的`pred`和`data`的合并了。所以，这句话其实就是对`pred`字典的格式做了一个整合，把两个字典整合成一个字典。在空白脚本中测试一下下述代码：
+``` python
+# 以下代码在一个空白脚本里运行
+mydict1 = {"a": 1, "b": 2, "c": 3}
+mydict2 = {"d": 4, "e": 5, "f": 6}
+
+mydict = {**mydict1, **mydict2}
+
+print(mydict)
+```
+结果为：
+```
+{'a': 1, 'b': 2, 'c': 3, 'd': 4, 'e': 5, 'f': 6}
+```
+由此可见，当双星`**`用于Python的字典前面的时候，可以把字典里面的元素提取出来，合并成一个新字典。
+**（补充说明一句：以后对于开源代码里我不熟悉的Python或PyTorch用法，我都要尽量自己设计一些例子来复现，增强自己对不熟悉用法的理解。）**
+
+下面的两行代码做了一个是否有匹配特征点的判定：
+``` python
+if pred["skip_train"] == True:  # image has no keypoint
+    continue
+```
+这两行本身没有什么难度。但是，有一个问题必须搞清楚：在哪里对`pred["skip_train"]`的值做了改动？在`/SuperGlue-pytorch/train.py`脚本里，没有看到对`pred["skip_train"]`的值做改动的部分。这个时候，可以用vscode自带的全局搜索功能，在整个`SuperGlue-pytorch`代码库文件夹里搜索`skip_train`，可以看到，在`/SuperGlue-pytorch/models/superglue.py`文件的`class SuperGlue(nn.Module):`类的`def forward(self, data):`函数里，设定了`'skip_train': True`或`'skip_train': False`。至此就清楚了，对`pred["skip_train"]`的值做改动的部分位于模型的推理代码（也就是`/SuperGlue-pytorch/models/superglue.py`文件的`class SuperGlue(nn.Module):`类的`def forward(self, data):`函数）里面。
+
+下面就是loss计算和梯度反向传播的代码：
+``` python
+# process loss
+Loss = pred["loss"]
+epoch_loss += Loss.item()
+mean_loss.append(Loss)
+
+# superglue.zero_grad()  #注意，这里我怀疑原始的开源代码作者写错了。我改成了optimizer.zero_grad()
+optimizer.zero_grad()
+Loss.backward()
+optimizer.step()
+```
+这六行代码整体来说，属于PyTorch自身的固定用法，并没有什么特别的技巧可言，只需要记住会用就行了（参考[这个例子](https://pytorch.org/tutorials/beginner/examples_nn/two_layer_net_optim.html)）。不过，我们还是要来仔细地看一下`Loss`变量究竟是什么样子的。测试下述代码：
+``` python
+# process loss
+Loss = pred["loss"]
+print("----------------------开始监视代码----------------------")
+print("type(Loss)：", type(Loss))
+print("----------------------我的分割线1----------------------")
+print("Loss：", Loss)
+print("----------------------我的分割线2----------------------")
+print("type(Loss.item())：", type(Loss.item()))
+print("----------------------我的分割线3----------------------")
+print("Loss.item()：", Loss.item())
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(Loss)： <class 'torch.Tensor'>
+----------------------我的分割线1----------------------
+Loss： tensor([1.9400], device='cuda:0', dtype=torch.float64,
+       grad_fn=<SelectBackward0>)
+----------------------我的分割线2----------------------
+type(Loss.item())： <class 'float'>
+----------------------我的分割线3----------------------
+Loss.item()： 1.940043657850143
+----------------------结束监视代码----------------------
+```
+可以看到，这里的`Loss`变量不是一个实数，而是一个PyTorch张量。这个PyTorch张量里面记录了loss的值、所在的设备（这里是`cuda`）、数据类型（这里是`torch.float64`）和梯度函数（这里是`<SelectBackward0>`）。而使用函数`.item()`，就可以把`Loss`里的值取出来了。我们在空白脚本里测试一下函数`.item()`的用法：
+``` python
+# 以下代码在一个空白脚本里运行
+import torch
+
+mytensor = torch.tensor([1.9876])
+
+print("mytensor：", mytensor)
+print("mytensor.item()：", mytensor.item())
+```
+结果为：
+```
+mytensor： tensor([1.9876])
+mytensor.item()： 1.9875999689102173
+```
+（注：在这个演示里，浮点数的位数变多了，这个和计算机自身浮点数存储有关。参考[这里的解释](https://zhuanlan.zhihu.com/p/345487165)。要想知道更详细的解释，可以参考计算机科学的教材，去学学计算机是如何存储浮点数的。）
+
+
+接下来的代码可视化了训练过程和训练loss：
+``` python
+# for every 50 images, print progress and visualize the matches
+if (i + 1) % 50 == 0:
+    print(
+        "Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}".format(
+            epoch,
+            opt.epoch,
+            i + 1,
+            len(train_loader),
+            torch.mean(torch.stack(mean_loss)).item(),
+        )
+    )
+    mean_loss = []
+```
+这段代码整体而言，也没什么可说的。`torch.stack`的用法之前已经分析过了。`torch.mean`的用法参考[PyTorch官方TORCH.MEAN文档](https://pytorch.org/docs/stable/generated/torch.mean.html)。
+
+接下来的代码进入了评测阶段：
+``` python
+### eval ###
+# Visualize the matches.
+superglue.eval()
+image0, image1 = (
+    pred["image0"].cpu().numpy()[0] * 255.0,
+    pred["image1"].cpu().numpy()[0] * 255.0,
+)
+kpts0, kpts1 = (
+    pred["keypoints0"].cpu().numpy()[0],
+    pred["keypoints1"].cpu().numpy()[0],
+)
+matches, conf = (
+    pred["matches0"].cpu().detach().numpy(),
+    pred["matching_scores0"].cpu().detach().numpy(),
+)
+```
+这些代码是在把原来的GPU模式转换成CPU模式，并且把PyTorch张量转换成numpy数组。
