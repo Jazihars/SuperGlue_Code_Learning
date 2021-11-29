@@ -3227,7 +3227,53 @@ if (i + 1) % 50 == 0:
     )
     mean_loss = []
 ```
-这段代码整体而言，也没什么可说的。`torch.stack`的用法之前已经分析过了。`torch.mean`的用法参考[PyTorch官方TORCH.MEAN文档](https://pytorch.org/docs/stable/generated/torch.mean.html)。
+这段代码整体而言，也没什么可说的。`torch.stack`的用法之前已经分析过了。`torch.mean`的用法参考[PyTorch官方TORCH.MEAN文档](https://pytorch.org/docs/stable/generated/torch.mean.html)。关于`torch.mean`的用法，我们在空白脚本里测试一下下述代码：
+``` python
+# 以下代码在一个空白脚本里运行
+import torch
+
+mytensor1 = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+mytensor2 = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+mytensor3 = torch.tensor([[1.0], [2.0], [3.0], [4.0], [5.0], [6.0]])
+
+
+print("----------------------开始监视代码----------------------")
+print("mytensor1：", mytensor1)
+print("mytensor1.shape：", mytensor1.shape)
+print("torch.mean(mytensor1)：", torch.mean(mytensor1))
+print("----------------------我的分割线1----------------------")
+print("mytensor2：", mytensor2)
+print("mytensor2.shape：", mytensor2.shape)
+print("torch.mean(mytensor2)：", torch.mean(mytensor2))
+print("----------------------我的分割线2----------------------")
+print("mytensor3：", mytensor3)
+print("mytensor3.shape：", mytensor3.shape)
+print("torch.mean(mytensor3)：", torch.mean(mytensor3))
+print("----------------------结束监视代码----------------------")
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+mytensor1： tensor([1., 2., 3., 4., 5., 6.])
+mytensor1.shape： torch.Size([6])
+torch.mean(mytensor1)： tensor(3.5000)
+----------------------我的分割线1----------------------
+mytensor2： tensor([[1., 2., 3.],
+        [4., 5., 6.]])
+mytensor2.shape： torch.Size([2, 3])
+torch.mean(mytensor2)： tensor(3.5000)
+----------------------我的分割线2----------------------
+mytensor3： tensor([[1.],
+        [2.],
+        [3.],
+        [4.],
+        [5.],
+        [6.]])
+mytensor3.shape： torch.Size([6, 1])
+torch.mean(mytensor3)： tensor(3.5000)
+----------------------结束监视代码----------------------
+```
+由此就明白了：`torch.mean()`函数的用法是返回输入张量的所有元素的平均值，而不在乎输入张量的形状如何。
 
 接下来的代码进入了评测阶段：
 ``` python
@@ -3247,4 +3293,159 @@ matches, conf = (
     pred["matching_scores0"].cpu().detach().numpy(),
 )
 ```
-这些代码是在把原来的GPU模式转换成CPU模式，并且把PyTorch张量转换成numpy数组。
+这些代码是在把原来的GPU模式转换成CPU模式，并且把PyTorch张量转换成numpy数组。我们来看看，这些代码里引用的那些函数都有什么功能。测试如下的代码：
+``` python
+print("----------------------开始监视代码----------------------")
+print('type(pred["image0"])：', type(pred["image0"]))
+print("----------------------我的分割线1----------------------")
+print('pred["image0"].shape：', pred["image0"].shape)
+print("----------------------我的分割线2----------------------")
+print(
+    'type(pred["image0"].cpu().numpy())：',
+    type(pred["image0"].cpu().numpy()),
+)
+print("----------------------我的分割线3----------------------")
+print(
+    'pred["image0"].cpu().numpy().shape：',
+    pred["image0"].cpu().numpy().shape,
+)
+print("----------------------结束监视代码----------------------")
+exit()
+
+image0, image1 = (
+    pred["image0"].cpu().numpy()[0] * 255.0,
+    pred["image1"].cpu().numpy()[0] * 255.0,
+)
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(pred["image0"])： <class 'torch.Tensor'>
+----------------------我的分割线1----------------------
+pred["image0"].shape： torch.Size([1, 428, 640])
+----------------------我的分割线2----------------------
+type(pred["image0"].cpu().numpy())： <class 'numpy.ndarray'>
+----------------------我的分割线3----------------------
+pred["image0"].cpu().numpy().shape： (1, 428, 640)
+----------------------结束监视代码----------------------
+```
+我们可以看到，对一个PyTorch张量调用了`.cpu().numpy()`函数之后，这个张量的形状保持不变，但是数据类型就被转换成了`<class 'numpy.ndarray'>`类型了。
+
+再来测试一下下面的`.detach()`函数的用法。测试如下的代码：
+``` python
+print("----------------------开始监视代码----------------------")
+print('type(pred["matches0"])：', type(pred["matches0"]))
+print("----------------------我的分割线1----------------------")
+print('pred["matches0"].shape：', pred["matches0"].shape)
+print("----------------------我的分割线2----------------------")
+print(
+    'type(pred["matches0"].cpu().detach().numpy())：',
+    type(pred["matches0"].cpu().detach().numpy()),
+)
+print("----------------------我的分割线3----------------------")
+print(
+    'pred["matches0"].cpu().detach().numpy().shape：',
+    pred["matches0"].cpu().detach().numpy().shape,
+)
+print("----------------------结束监视代码----------------------")
+exit()
+
+image0, image1 = (
+    pred["image0"].cpu().numpy()[0] * 255.0,
+    pred["image1"].cpu().numpy()[0] * 255.0,
+)
+kpts0, kpts1 = (
+    pred["keypoints0"].cpu().numpy()[0],
+    pred["keypoints1"].cpu().numpy()[0],
+)
+matches, conf = (
+    pred["matches0"].cpu().detach().numpy(),
+    pred["matching_scores0"].cpu().detach().numpy(),
+)
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(pred["matches0"])： <class 'torch.Tensor'>
+----------------------我的分割线1----------------------
+pred["matches0"].shape： torch.Size([1024])
+----------------------我的分割线2----------------------
+type(pred["matches0"].cpu().detach().numpy())： <class 'numpy.ndarray'>
+----------------------我的分割线3----------------------
+pred["matches0"].cpu().detach().numpy().shape： (1024,)
+----------------------结束监视代码----------------------
+```
+这里我们没有见过的就是PyTorch张量通过点语法调用`detach()`函数的用法。关于这个PyTorch张量的`detach()`函数的用法，可以参考[PyTorch官方TORCH.TENSOR.DETACH文档](https://pytorch.org/docs/stable/generated/torch.Tensor.detach.html)。我们在一个空白脚本里测试一下这个函数。在空白脚本里测试如下的代码：
+``` python
+# 以下代码在一个空白脚本里运行
+import torch
+
+mytensor = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+
+shuchu = mytensor.cpu().detach().numpy()
+
+print("type(shuchu)：", type(shuchu))
+print("shuchu：", shuchu)
+```
+结果为：
+```
+type(shuchu)： <class 'numpy.ndarray'>
+shuchu： [[1. 2. 3.]
+ [4. 5. 6.]]
+```
+这里的测试，确实看不出来`torch.tensor.detach()`函数的作用，但是参考[上面的文档](https://pytorch.org/docs/stable/generated/torch.Tensor.detach.html)可以知道，`torch.tensor.detach()`函数的作用是：返回一个新的张量，这个新的张量是与当前的计算图解绑的。
+
+接下来的两行代码调用了一个新的函数：
+``` python
+image0 = read_image_modified(image0, opt.resize, opt.resize_float)
+image1 = read_image_modified(image1, opt.resize, opt.resize_float)
+```
+我们来看一下这个`read_image_modified()`函数的完整代码。这个`read_image_modified()`函数位于`/SuperGlue-pytorch/models/utils.py`代码里。`read_image_modified()`函数的完整代码如下：
+``` python
+def read_image_modified(image, resize, resize_float):
+    if image is None:
+        return None, None, None
+    w, h = image.shape[1], image.shape[0]
+    w_new, h_new = process_resize(w, h, resize)
+    scales = (float(w) / float(w_new), float(h) / float(h_new))
+    if resize_float:
+        image = cv2.resize(image.astype('float32'), (w_new, h_new))
+    else:
+        image = cv2.resize(image, (w_new, h_new)).astype('float32')
+    return image
+```
+这个函数的具体用法，我暂时先不深入研究了。只需注意：这个函数接收的两个参数`resize`和`resize_float`的含义，在`/SuperGlue-pytorch/train.py`脚本最上面已经有了相应的解释，因此我即便是不完全清楚这个`read_image_modified(image, resize, resize_float)`函数的用法，也可以参照`/SuperGlue-pytorch/train.py`脚本最上面对`resize`和`resize_float`这两个参数的解释来操作。
+
+接下来的几行代码是比较`numpy`数组中的元素与-1的大小，并取出合法的匹配对。如果大于-1，则算是成功的特征点匹配：
+``` python
+valid = matches > -1
+mkpts0 = kpts0[valid]
+mkpts1 = kpts1[matches[valid]]
+mconf = conf[valid]
+```
+对于这里第一行`valid = matches > -1`的用法，我们在空白脚本里进行如下的测试：
+``` python
+# 以下代码在一个空白脚本里运行
+import numpy as np
+import torch
+
+myabc = np.array([1, 2, 3, 4])
+mydef = myabc > 0
+print("myabc：", myabc)
+print("mydef：", mydef)
+
+mytensor1 = torch.tensor([1, 2, 3, 4])
+mytensor2 = mytensor1 > 0
+print("mytensor1：", mytensor1)
+print("mytensor2：", mytensor2)
+```
+结果为：
+```
+myabc： [1 2 3 4]
+mydef： [ True  True  True  True]
+mytensor1： tensor([1, 2, 3, 4])
+mytensor2： tensor([True, True, True, True])
+```
+这种把`numpy`n维数组和PyTorch张量和一个固定数进行逐个元素比较大小的用法，一定要掌握。
+
+剩下的代码，我看了之后，发现没有什么特别重要的需要现在立刻掌握的用法了。我的这份SuperGlue训练脚本学习笔记，就暂且写到这里吧。
