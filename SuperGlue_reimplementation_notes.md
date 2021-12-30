@@ -55,7 +55,9 @@ scp ...
 
 为了最大限度地应用已有的开源代码，我决定在[官方SuperGlue模型和评测脚本](https://github.com/magicleap/SuperGluePretrainedNetwork)的基础上，完全参考[已有的SuperGlue开源PyTorch复现](https://github.com/HeatherJiaZG/SuperGlue-pytorch)，将缺少的代码补全，然后再逐步修复bug的做法。这是我第一次尝试复现训练脚本，我并不确定这种策略一定能成功。
 
-首先，将[已有的SuperGlue开源PyTorch复现](https://github.com/HeatherJiaZG/SuperGlue-pytorch)中的`train.py`，`matchingForTraining.py`和`load_data.py`三份脚本完全复制过来，路径为：`/SuperGluePretrainedNetwork/train.py`，`/SuperGluePretrainedNetwork/models/matchingForTraining.py`和`/SuperGluePretrainedNetwork/load_data.py`。
+1.将[已有的SuperGlue开源PyTorch复现](https://github.com/HeatherJiaZG/SuperGlue-pytorch)中的`train.py`，`matchingForTraining.py`和`load_data.py`三份脚本完全复制过来，路径为：`/SuperGluePretrainedNetwork/train.py`，`/SuperGluePretrainedNetwork/models/matchingForTraining.py`和`/SuperGluePretrainedNetwork/load_data.py`。
+2.在训练脚本`/SuperGluePretrainedNetwork/train.py`中，将训练路径参数`train_path`的默认值修改为：`/home/users/XXX/coco2014/train2014/`。
+3.将[已有的SuperGlue开源PyTorch复现](https://github.com/HeatherJiaZG/SuperGlue-pytorch)中的`/SuperGlue-pytorch/models/utils.py`中的`def read_image_modified(image, resize, resize_float):`函数的代码复制到`/SuperGluePretrainedNetwork/models/utils.py`里面。
+4.修复`AttributeError: module 'cv2' has no attribute 'xfeatures2d'`的错误：由于我安装的是最新版本的`opencv-python`，因此，直接使用`cv2.SIFT_create()`即可。
 
-在训练脚本`/SuperGluePretrainedNetwork/train.py`中，将训练路径参数`train_path`的默认值修改为：`/home/users/XXX/coco2014/train2014/`。
-
+这份笔记暂时不更新了。因为我暂时不知道怎么解决后续的bug。
