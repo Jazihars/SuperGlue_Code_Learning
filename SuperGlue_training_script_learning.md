@@ -615,7 +615,7 @@ train_loader = torch.utils.data.DataLoader(
     dataset=train_set, shuffle=False, batch_size=opt.batch_size, drop_last=True
 )
 ```
-我们可以看到，这两行代码，第一行是初始化一个训练数据集对象`train_set`，第二行是初始化一个训练数据加载器对象`train_loader`。而且，由于这里没有使用[torch.utils.data.distributed.DistributedSampler](https://pytorch.org/docs/stable/data.html#torch.utils.data.distributed.DistributedSampler)，因此SuperGlue-pytorch的训练会采用单机单卡的方式进行。关于如何实现单机多卡或多机多卡，可以参考一些比较优秀的开源代码（比如[Swin Transformer的代码](https://github.com/Jazihars/Swin_Transformer_Code_Learning/blob/main/Swin_Transformer_Code_Study_Notes.md)）。以后，我会考虑详细地学一下该如何实现单机多卡和多机多卡的编写。
+我们可以看到，这两行代码，第一行是初始化一个训练数据集对象`train_set`，第二行是初始化一个训练数据加载器对象`train_loader`。而且，由于这里没有使用[torch.utils.data.distributed.DistributedSampler](https://pytorch.org/docs/stable/data.html#torch.utils.data.distributed.DistributedSampler)，因此SuperGlue-pytorch的训练会采用单机单卡的方式进行。关于如何实现单机多卡或多机多卡，可以参考一些比较优秀的开源代码（比如[Swin Transformer的代码](https://github.com/Jazihars/Swin_Transformer_Code_Learning/blob/main/Swin_Transformer_Code_Study_Notes.md)）。以后，我会考虑详细地学一下该如何实现单机多卡和多机多卡的编写。（2022年2月15日更新：我已经实现了[单机多卡训练SuperGlue的脚本](https://github.com/Jazihars/SuperGlue_PyTorch_MultiGPU_implementation)）
 
 我们先来进行一下下面的测试：
 ``` python
