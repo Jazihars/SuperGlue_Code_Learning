@@ -1072,3 +1072,160 @@ ls -l | grep "^-" | wc -l
 82783
 ```
 由此就明白了：**本次训练的数据都存放在`opt.train_path`目录下。`opt.train_path`目录的具体的值是`/data/zitong.yin/coco2014/train2014/`。在这个`opt.train_path`目录下是82783张无标签的图片。**
+**而且，随机打开几张`/data/zitong.yin/coco2014/train2014/`目录下的图片可以看到，这个目录下的图片的分辨率彼此之间是不一样的。比如，`/data/zitong.yin/coco2014/train2014/COCO_train2014_000000387678.jpg`这张图片的分辨率是`640x478`，`/data/zitong.yin/coco2014/train2014/COCO_train2014_000000193954.jpg`这张图片的分辨率是`480x640`，`/data/zitong.yin/coco2014/train2014/COCO_train2014_000000581921.jpg`这张图片的分辨率是`640x427`...这个细节必须注意。**
+
+接下来我们看一下稀疏数据加载器`train_loader`的构造代码：
+``` python
+train_loader = torch.utils.data.DataLoader(
+    dataset=train_set, shuffle=False, batch_size=opt.batch_size, drop_last=True
+)
+```
+在Linux终端里运行下述命令：
+``` bash
+python
+import torch
+torch.__version__
+```
+可以看到，输出了我用的PyTorch的版本：
+```
+'1.8.0'
+```
+去查看[1.8.0版本的torch.utils.data.DataLoader文档](https://pytorch.org/docs/1.8.0/data.html#torch.utils.data.DataLoader)，可以看到稀疏数据加载器的构造函数所需要的各个参数的含义。由于构造训练数据Dataset对象`train_set`的代码中包含了数据接口中的主要部分，训练用DataLoader的构造仅仅是调用PyTorch官方接口而已，所以接下来将重点分析训练数据Dataset对象`train_set`的构造细节以及稀疏数据集类`SparseDataset`类的写法。
+
+## 训练数据集类SparseDataset类的代码
+从训练脚本`/SuperGlue-pytorch/train.py`的训练数据集对象构造代码：
+``` python
+train_set = SparseDataset(opt.train_path, opt.max_keypoints)
+```
+中，进入`SparseDataset`的定义（利用vscode自带的跳转功能即可），我们来到了`SparseDataset`类的代码（下面的代码就是`/SuperGlue-pytorch/load_data.py`脚本的全部代码）：
+``` python
+import numpy as np
+import torch
+import os
+import cv2
+import math
+import datetime
+
+from scipy.spatial.distance import cdist
+from torch.utils.data import Dataset
+
+
+class SparseDataset(Dataset):
+    """Sparse correspondences dataset."""
+
+    def __init__(self, train_path, nfeatures):
+
+        self.files = []
+        self.files += [train_path + f for f in os.listdir(train_path)]
+
+        self.nfeatures = nfeatures
+        self.sift = cv2.SIFT_create(nfeatures=self.nfeatures)
+        self.matcher = cv2.BFMatcher_create(cv2.NORM_L1, crossCheck=False)
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, idx):
+        file_name = self.files[idx]
+        image = cv2.imread(file_name, cv2.IMREAD_GRAYSCALE)
+        sift = self.sift
+        width, height = image.shape[:2]
+        corners = np.array(
+            [[0, 0], [0, height], [width, 0], [width, height]], dtype=np.float32
+        )
+        warp = np.random.randint(-224, 224, size=(4, 2)).astype(np.float32)
+
+        # get the corresponding warped image
+        M = cv2.getPerspectiveTransform(corners, corners + warp)
+        warped = cv2.warpPerspective(
+            src=image, M=M, dsize=(image.shape[1], image.shape[0])
+        )  # return an image type
+
+        # extract keypoints of the image pair using SIFT
+        kp1, descs1 = sift.detectAndCompute(image, None)
+        kp2, descs2 = sift.detectAndCompute(warped, None)
+
+        # limit the number of keypoints
+        kp1_num = min(self.nfeatures, len(kp1))
+        kp2_num = min(self.nfeatures, len(kp2))
+        kp1 = kp1[:kp1_num]
+        kp2 = kp2[:kp2_num]
+
+        kp1_np = np.array([(kp.pt[0], kp.pt[1]) for kp in kp1])
+        kp2_np = np.array([(kp.pt[0], kp.pt[1]) for kp in kp2])
+
+        # skip this image pair if no keypoints detected in image
+        if len(kp1) <= 1 or len(kp2) <= 1:
+            return {
+                "keypoints0": torch.zeros([0, 0, 2], dtype=torch.double),
+                "keypoints1": torch.zeros([0, 0, 2], dtype=torch.double),
+                "descriptors0": torch.zeros([0, 2], dtype=torch.double),
+                "descriptors1": torch.zeros([0, 2], dtype=torch.double),
+                "image0": image,
+                "image1": warped,
+                "file_name": file_name,
+            }
+
+        # confidence of each key point
+        scores1_np = np.array([kp.response for kp in kp1])
+        scores2_np = np.array([kp.response for kp in kp2])
+
+        kp1_np = kp1_np[:kp1_num, :]
+        kp2_np = kp2_np[:kp2_num, :]
+        descs1 = descs1[:kp1_num, :]
+        descs2 = descs2[:kp2_num, :]
+
+        # obtain the matching matrix of the image pair
+        matched = self.matcher.match(descs1, descs2)
+        kp1_projected = cv2.perspectiveTransform(kp1_np.reshape((1, -1, 2)), M)[0, :, :]
+        dists = cdist(kp1_projected, kp2_np)
+
+        min1 = np.argmin(dists, axis=0)
+        min2 = np.argmin(dists, axis=1)
+
+        min1v = np.min(dists, axis=1)
+        min1f = min2[min1v < 3]
+
+        xx = np.where(min2[min1] == np.arange(min1.shape[0]))[0]
+        matches = np.intersect1d(min1f, xx)
+
+        missing1 = np.setdiff1d(np.arange(kp1_np.shape[0]), min1[matches])
+        missing2 = np.setdiff1d(np.arange(kp2_np.shape[0]), matches)
+
+        MN = np.concatenate([min1[matches][np.newaxis, :], matches[np.newaxis, :]])
+        MN2 = np.concatenate(
+            [
+                missing1[np.newaxis, :],
+                (len(kp2)) * np.ones((1, len(missing1)), dtype=np.int64),
+            ]
+        )
+        MN3 = np.concatenate(
+            [
+                (len(kp1)) * np.ones((1, len(missing2)), dtype=np.int64),
+                missing2[np.newaxis, :],
+            ]
+        )
+        all_matches = np.concatenate([MN, MN2, MN3], axis=1)
+
+        kp1_np = kp1_np.reshape((1, -1, 2))
+        kp2_np = kp2_np.reshape((1, -1, 2))
+        descs1 = np.transpose(descs1 / 256.0)
+        descs2 = np.transpose(descs2 / 256.0)
+
+        image = torch.from_numpy(image / 255.0).double()[None].cuda()
+        warped = torch.from_numpy(warped / 255.0).double()[None].cuda()
+
+        return {
+            "keypoints0": list(kp1_np),
+            "keypoints1": list(kp2_np),
+            "descriptors0": list(descs1),
+            "descriptors1": list(descs2),
+            "scores0": list(scores1_np),
+            "scores1": list(scores2_np),
+            "image0": image,
+            "image1": warped,
+            "all_matches": list(all_matches),
+            "file_name": file_name,
+        }
+```
+可以看到，`SparseDataset`类的代码构成了`/SuperGlue-pytorch/load_data.py`脚本的全部代码。下面我们来逐行分析`SparseDataset`类的代码。
