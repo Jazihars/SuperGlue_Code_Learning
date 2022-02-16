@@ -1229,3 +1229,649 @@ class SparseDataset(Dataset):
         }
 ```
 可以看到，`SparseDataset`类的代码构成了`/SuperGlue-pytorch/load_data.py`脚本的全部代码。下面我们来逐行分析`SparseDataset`类的代码。
+
+## 训练数据集类SparseDataset类的代码的详细分析
+下面我们来详细分析SuperGlue训练数据集类`SparseDataset`类的代码。按照[PyTorch Dataset&DataLoaders教程](https://pytorch.org/tutorials/beginner/basics/data_tutorial.html)，任意一个PyTorch数据集类都必须是`torch.utils.data.Dataset`类的子类，并且必须实现`__init__()`，`__len__()`和`__getitem__()`这三个方法。现在我们来详细地看一看SuperGlue训练数据集类`SparseDataset`类的这三个函数分别是怎么实现的。
+
+### 训练数据集类SparseDataset类的__init__()函数
+训练数据集类`SparseDataset`类的`__init__()`函数的代码如下：
+``` python
+def __init__(self, train_path, nfeatures):
+
+    self.files = []
+    self.files += [train_path + f for f in os.listdir(train_path)]
+
+    self.nfeatures = nfeatures
+    self.sift = cv2.SIFT_create(nfeatures=self.nfeatures)
+    self.matcher = cv2.BFMatcher_create(cv2.NORM_L1, crossCheck=False)
+```
+这个`__init__()`函数接收两个输入。在本次测试中，第一个输入`train_path`的值是`/data/zitong.yin/coco2014/train2014/`，它是训练数据的存储路径，在这个路径下的是82783张无标签的尺寸彼此不同的RGB图片（本次测试使用的是`coco2014`的训练数据）。第二个输入`nfeatures`的值是`1024`，它代表特征点的最大数目。
+
+我们先来看一下训练数据集类`SparseDataset`类的`__init__()`函数是如何处理本次的训练数据的。测试如下的代码：
+``` python
+self.files = []
+self.files += [train_path + f for f in os.listdir(train_path)]
+print("----------------------开始监视代码----------------------")
+print("len(self.files): ", len(self.files))
+print("----------------------我的分割线1----------------------")
+temp = 0
+for i in self.files:
+    print(i)
+    temp += 1
+    if temp == 10:
+        break
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+len(self.files):  82783
+----------------------我的分割线1----------------------
+/data/zitong.yin/coco2014/train2014/COCO_train2014_000000287870.jpg
+/data/zitong.yin/coco2014/train2014/COCO_train2014_000000206577.jpg
+/data/zitong.yin/coco2014/train2014/COCO_train2014_000000451353.jpg
+/data/zitong.yin/coco2014/train2014/COCO_train2014_000000137704.jpg
+/data/zitong.yin/coco2014/train2014/COCO_train2014_000000539384.jpg
+/data/zitong.yin/coco2014/train2014/COCO_train2014_000000399325.jpg
+/data/zitong.yin/coco2014/train2014/COCO_train2014_000000069777.jpg
+/data/zitong.yin/coco2014/train2014/COCO_train2014_000000102862.jpg
+/data/zitong.yin/coco2014/train2014/COCO_train2014_000000339051.jpg
+/data/zitong.yin/coco2014/train2014/COCO_train2014_000000117494.jpg
+----------------------结束监视代码----------------------
+```
+由此就明白了：训练数据集类`SparseDataset`类的`__init__()`函数首先把所有的训练数据图片的绝对路径放到了`self.files`这个list里面。`self.files`这个list的长度就是本次所用的训练数据的个数82783。
+这里面用到了一个`os.listdir()`函数。我们在一个空白脚本`/SuperGlue-pytorch/test.py`里测试一下这个`os.listdir()`函数的用法。测试如下代码：
+``` python
+import os
+
+mylist = os.listdir("/data/zitong.yin/SuperGlue-pytorch")
+print(mylist)
+```
+结果为：
+```
+['assets', 'match_pairs.py', '.vscode', 'LICENSE', '.gitignore', 'test.py', 'README.md', 'dump_match_pairs', 'train_DistributedDataParallel.py', 'requirements.txt', 'superglue.txt', '__pycache__', 'load_data.py', 'train.py', 'models']
+```
+由此就明白了：`os.listdir()`函数的作用是返回指定路径下的所有文件和文件夹名称的列表。参见[os.listdir()函数用法的解释](https://www.runoob.com/python/os-listdir.html)
+
+既然已经处理完了本次训练数据的路径，我们接下来仔细研究一下训练数据集类`SparseDataset`类的`__init__()`函数剩下的三行代码：
+``` python
+self.nfeatures = nfeatures
+self.sift = cv2.SIFT_create(nfeatures=self.nfeatures)
+self.matcher = cv2.BFMatcher_create(cv2.NORM_L1, crossCheck=False)
+```
+关于这三行代码，有一点需要留意：这三行代码没有用到上面刚刚存储好的包含所有训练数据的绝对路径的那个`self.files`列表。由此，这三行代码其实没有对训练数据本身做进一步的处理。我们之后要仔细地搞清楚：`SparseDataset`类到底对训练数据做了哪些处理？为什么本次训练使用的是无标签的训练数据？对上面的三行代码，我们来测试一下下述代码：
+``` python
+self.nfeatures = nfeatures
+self.sift = cv2.SIFT_create(nfeatures=self.nfeatures)
+self.matcher = cv2.BFMatcher_create(cv2.NORM_L1, crossCheck=False)
+print("----------------------开始监视代码----------------------")
+print("type(self.sift): ", type(self.sift))
+print("----------------------我的分割线1----------------------")
+print("self.sift: ", self.sift)
+print("----------------------我的分割线2----------------------")
+print("type(self.matcher): ", type(self.matcher))
+print("----------------------我的分割线3----------------------")
+print("self.matcher: ", self.matcher)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(self.sift):  <class 'cv2.SIFT'>
+----------------------我的分割线1----------------------
+self.sift:  <SIFT 0x7fcc0e97f250>
+----------------------我的分割线2----------------------
+type(self.matcher):  <class 'cv2.BFMatcher'>
+----------------------我的分割线3----------------------
+self.matcher:  <BFMatcher 0x7fcc0e97f4d0>
+----------------------结束监视代码----------------------
+```
+我们看到，`self.sift = cv2.SIFT_create(nfeatures=self.nfeatures)`这一行代码就是初始化了一个`<class 'cv2.SIFT'>`类的对象。根据名称猜测，这个`self.sift`对象应该是和SIFT特征点有关。`self.matcher = cv2.BFMatcher_create(cv2.NORM_L1, crossCheck=False)`这一行代码初始化了一个`<class 'cv2.BFMatcher'>`类的对象。根据名称猜测，这个`self.matcher`对象应该是和匹配子有关。我们需要查一些资料，来确定一下这两个`cv2`的类的用法。
+
+参考[CSDN上测试SIFT算子匹配点的一个案例](https://blog.csdn.net/cliukai/article/details/102525486)，在空白脚本`/SuperGlue-pytorch/test.py`里运行下述代码：
+``` python
+import cv2
+
+# 加载两张待匹配的图片
+image1_path = "/data/zitong.yin/SuperGlue-pytorch/assets/mytestphoto/photo1_1.png"
+image2_path = "/data/zitong.yin/SuperGlue-pytorch/assets/mytestphoto/photo1_2.png"
+img1 = cv2.imread(image1_path, 0)
+img2 = cv2.imread(image2_path, 0)
+
+# 初始化SIFT算子
+sift = cv2.SIFT_create(nfeatures=1024)
+
+# 使用SIFT算子计算特征点和特征点周围的特征向量
+kp1, des1 = sift.detectAndCompute(img1, None)
+kp2, des2 = sift.detectAndCompute(img2, None)
+
+# BFMatcher中设置knn的k值
+matcher = cv2.BFMatcher_create(cv2.NORM_L1, crossCheck=False)
+matches = matcher.knnMatch(des1, des2, k=2)
+
+# Apply ratio test
+good = []
+for m, n in matches:
+    if m.distance < 0.75 * n.distance:
+        good.append([m])
+
+# 绘制新的两张图片匹配的图
+imgNew = cv2.drawMatchesKnn(img1, kp1, img2, kp2, good, None, flags=2)
+
+# 保存图片
+cv2.imwrite("imgNew.jpg", imgNew)
+```
+这段脚本的主要功能就是在一对匹配图像上测试SIFT特征点的匹配效果。运行这段脚本后，在Linux终端里使用
+``` bash
+code imgNew.jpg
+```
+命令，就可以看到生成的左右两张匹配图片的SIFT特征点匹配效果了。
+综上所述，**训练数据集类SparseDataset类的__init__()函数干的事情就是：把所有的训练用的无标签图片的绝对路径存储到一个名为`self.files`的list里。再创建两个和SIFT特征点匹配有关的对象`self.sift`和`self.matcher`**
+
+### 训练数据集类SparseDataset类的__len__()函数
+训练数据集类SparseDataset类的__len__()函数的代码如下：
+``` python
+def __len__(self):
+    return len(self.files)
+```
+参考[PyTorch Dataset&DataLoaders教程 __len__()函数的解释](https://pytorch.org/tutorials/beginner/basics/data_tutorial.html#len)，PyTorch数据集类Dataset类的`__len__()`函数应该返回数据集的数据样本个数。
+在本次SuperGlue的训练中，训练数据集类SparseDataset类的__len__()函数的功能就是返回训练用无标签图片的个数。本次训练时，使用的是`coco2014`的训练数据。因此，在本次训练时，训练数据集类SparseDataset类的__len__()函数的返回值应为`82783`。
+
+### 训练数据集类SparseDataset类的__getitem__()函数
+参考[PyTorch Dataset&DataLoaders教程 __getitem__()函数的解释](https://pytorch.org/tutorials/beginner/basics/data_tutorial.html#getitem)，PyTorch数据集类Dataset类的__getitem__()函数要实现的功能是：在给定的索引`idx`处加载并返回数据集中的一个样本，最终PyTorch数据集类Dataset类的__getitem__()函数要返回的是在索引`idx`处的PyTorch张量格式的图片和对应的标签。
+在本次SuperGlue的训练中，训练数据集类SparseDataset类的__getitem__()函数的代码如下：
+``` python
+def __getitem__(self, idx):
+    file_name = self.files[idx]
+    image = cv2.imread(file_name, cv2.IMREAD_GRAYSCALE)
+    sift = self.sift
+    width, height = image.shape[:2]
+    corners = np.array(
+        [[0, 0], [0, height], [width, 0], [width, height]], dtype=np.float32
+    )
+    warp = np.random.randint(-224, 224, size=(4, 2)).astype(np.float32)
+
+    # get the corresponding warped image
+    M = cv2.getPerspectiveTransform(corners, corners + warp)
+    warped = cv2.warpPerspective(
+        src=image, M=M, dsize=(image.shape[1], image.shape[0])
+    )  # return an image type
+
+    # extract keypoints of the image pair using SIFT
+    kp1, descs1 = sift.detectAndCompute(image, None)
+    kp2, descs2 = sift.detectAndCompute(warped, None)
+
+    # limit the number of keypoints
+    kp1_num = min(self.nfeatures, len(kp1))
+    kp2_num = min(self.nfeatures, len(kp2))
+    kp1 = kp1[:kp1_num]
+    kp2 = kp2[:kp2_num]
+
+    kp1_np = np.array([(kp.pt[0], kp.pt[1]) for kp in kp1])
+    kp2_np = np.array([(kp.pt[0], kp.pt[1]) for kp in kp2])
+
+    # skip this image pair if no keypoints detected in image
+    if len(kp1) <= 1 or len(kp2) <= 1:
+        return {
+            "keypoints0": torch.zeros([0, 0, 2], dtype=torch.double),
+            "keypoints1": torch.zeros([0, 0, 2], dtype=torch.double),
+            "descriptors0": torch.zeros([0, 2], dtype=torch.double),
+            "descriptors1": torch.zeros([0, 2], dtype=torch.double),
+            "image0": image,
+            "image1": warped,
+            "file_name": file_name,
+        }
+
+    # confidence of each key point
+    scores1_np = np.array([kp.response for kp in kp1])
+    scores2_np = np.array([kp.response for kp in kp2])
+
+    kp1_np = kp1_np[:kp1_num, :]
+    kp2_np = kp2_np[:kp2_num, :]
+    descs1 = descs1[:kp1_num, :]
+    descs2 = descs2[:kp2_num, :]
+
+    # obtain the matching matrix of the image pair
+    matched = self.matcher.match(descs1, descs2)
+    kp1_projected = cv2.perspectiveTransform(kp1_np.reshape((1, -1, 2)), M)[0, :, :]
+    dists = cdist(kp1_projected, kp2_np)
+
+    min1 = np.argmin(dists, axis=0)
+    min2 = np.argmin(dists, axis=1)
+
+    min1v = np.min(dists, axis=1)
+    min1f = min2[min1v < 3]
+
+    xx = np.where(min2[min1] == np.arange(min1.shape[0]))[0]
+    matches = np.intersect1d(min1f, xx)
+
+    missing1 = np.setdiff1d(np.arange(kp1_np.shape[0]), min1[matches])
+    missing2 = np.setdiff1d(np.arange(kp2_np.shape[0]), matches)
+
+    MN = np.concatenate([min1[matches][np.newaxis, :], matches[np.newaxis, :]])
+    MN2 = np.concatenate(
+        [
+            missing1[np.newaxis, :],
+            (len(kp2)) * np.ones((1, len(missing1)), dtype=np.int64),
+        ]
+    )
+    MN3 = np.concatenate(
+        [
+            (len(kp1)) * np.ones((1, len(missing2)), dtype=np.int64),
+            missing2[np.newaxis, :],
+        ]
+    )
+    all_matches = np.concatenate([MN, MN2, MN3], axis=1)
+
+    kp1_np = kp1_np.reshape((1, -1, 2))
+    kp2_np = kp2_np.reshape((1, -1, 2))
+    descs1 = np.transpose(descs1 / 256.0)
+    descs2 = np.transpose(descs2 / 256.0)
+
+    image = torch.from_numpy(image / 255.0).double()[None].cuda()
+    warped = torch.from_numpy(warped / 255.0).double()[None].cuda()
+
+    return {
+        "keypoints0": list(kp1_np),
+        "keypoints1": list(kp2_np),
+        "descriptors0": list(descs1),
+        "descriptors1": list(descs2),
+        "scores0": list(scores1_np),
+        "scores1": list(scores2_np),
+        "image0": image,
+        "image1": warped,
+        "all_matches": list(all_matches),
+        "file_name": file_name,
+    }
+```
+我们来逐行分析训练数据集类SparseDataset类的__getitem__()函数的代码。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第1行代码是：
+``` python
+file_name = self.files[idx]
+```
+我们首先来测试下述代码（注意：在本次测试中，DataLoader的shuffle=False，这样，每次迭代训练数据时，第一张图片都是下面的这一张`COCO_train2014_000000287870.jpg`图片）：
+``` python
+file_name = self.files[idx]
+print("----------------------开始监视代码----------------------")
+print("type(file_name): ", type(file_name))
+print("----------------------我的分割线1----------------------")
+print("file_name: ", file_name)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(file_name):  <class 'str'>
+----------------------我的分割线1----------------------
+file_name:  /data/zitong.yin/coco2014/train2014/COCO_train2014_000000287870.jpg
+----------------------结束监视代码----------------------
+```
+由此知，`file_name`变量就是第一张图片的绝对路径的字符串。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第2行代码是：
+``` python
+image = cv2.imread(file_name, cv2.IMREAD_GRAYSCALE)
+```
+这行代码是在用OpenCV库来读取图片。本次读取的是灰度图。我们来测试一下下述代码：
+``` python
+image = cv2.imread(file_name, cv2.IMREAD_GRAYSCALE)
+print("----------------------开始监视代码----------------------")
+print("type(image): ", type(image))
+print("----------------------我的分割线1----------------------")
+print("image.shape: ", image.shape)
+print("----------------------我的分割线2----------------------")
+print("image: ", image)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(image):  <class 'numpy.ndarray'>
+----------------------我的分割线1----------------------
+image.shape:  (427, 640)
+----------------------我的分割线2----------------------
+image:  [[ 1  1  1 ... 27 27 26]
+ [ 1  1  1 ... 28 27 27]
+ [ 1  1  1 ... 29 28 27]
+ ...
+ [ 1  1  1 ...  6  6  6]
+ [ 1  1  1 ...  6  6  6]
+ [ 1  1  1 ...  6  6  6]]
+----------------------结束监视代码----------------------
+```
+由此可知：**OpenCV的`cv2.imread()`函数读取图片后，会把图片读成一个numpy的n维数组。读取之后的图片的`.shape`属性就是图片的尺寸**。这一点必须记住。这是工程经验的积累。
+我们再来试试，如果读取原始的RGB图会怎么样。测试下述代码：
+``` python
+# image = cv2.imread(file_name, cv2.IMREAD_GRAYSCALE)
+image = cv2.imread(file_name)
+print("----------------------开始监视代码----------------------")
+print("type(image): ", type(image))
+print("----------------------我的分割线1----------------------")
+print("image.shape: ", image.shape)
+print("----------------------我的分割线2----------------------")
+print("image: ", image)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(image):  <class 'numpy.ndarray'>
+----------------------我的分割线1----------------------
+image.shape:  (427, 640, 3)
+----------------------我的分割线2----------------------
+image:  [[[ 3  1  1]
+  [ 3  1  1]
+  [ 3  1  1]
+  ...
+  [73 24 14]
+  [73 24 14]
+  [72 23 13]]
+
+ [[ 3  1  1]
+  [ 3  1  1]
+  [ 3  1  1]
+  ...
+  [74 25 15]
+  [73 24 14]
+  [73 24 14]]
+
+ [[ 3  1  1]
+  [ 3  1  1]
+  [ 3  1  1]
+  ...
+  [75 26 16]
+  [74 25 15]
+  [73 24 14]]
+
+ ...
+
+ [[ 1  1  1]
+  [ 1  1  1]
+  [ 1  1  1]
+  ...
+  [22  4  3]
+  [22  4  3]
+  [22  4  3]]
+
+ [[ 1  1  1]
+  [ 1  1  1]
+  [ 1  1  1]
+  ...
+  [22  4  3]
+  [22  4  3]
+  [22  4  3]]
+
+ [[ 1  1  1]
+  [ 1  1  1]
+  [ 1  1  1]
+  ...
+  [22  4  3]
+  [22  4  3]
+  [22  4  3]]]
+----------------------结束监视代码----------------------
+```
+可以看到，如果直接读取原始的RGB图像，读出来的numpy n维数组就会有三个通道。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第3行代码是：
+``` python
+sift = self.sift
+```
+这一行代码没有什么好说的，就是把之前构造的用于提取SIFT特征点的`<class 'cv2.SIFT'>`类的对象存到一个名为`sift`的变量里。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第4行代码是：
+``` python
+width, height = image.shape[:2]
+```
+这行代码也没有什么可说的，就是取出这一张训练用图片的宽度和高度而已。我们来测试一下下述代码：
+``` python
+width, height = image.shape[:2]
+print("----------------------开始监视代码----------------------")
+print("type(width): ", type(width))
+print("----------------------我的分割线1----------------------")
+print("width: ", width)
+print("----------------------我的分割线2----------------------")
+print("type(height): ", type(height))
+print("----------------------我的分割线3----------------------")
+print("height: ", height)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(width):  <class 'int'>
+----------------------我的分割线1----------------------
+width:  427
+----------------------我的分割线2----------------------
+type(height):  <class 'int'>
+----------------------我的分割线3----------------------
+height:  640
+----------------------结束监视代码----------------------
+```
+可以看到，`width`和`height`是两个整数。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第5行代码是：
+``` python
+corners = np.array(
+    [[0, 0], [0, height], [width, 0], [width, height]], dtype=np.float32
+)
+```
+这行代码的功能是：构造一个这张图片的四个角点的坐标组成的numpy n维数组。我们来测试一下下述代码：
+``` python
+corners = np.array(
+    [[0, 0], [0, height], [width, 0], [width, height]], dtype=np.float32
+)
+print("----------------------开始监视代码----------------------")
+print("type(corners): ", type(corners))
+print("----------------------我的分割线1----------------------")
+print("corners.shape: ", corners.shape)
+print("----------------------我的分割线2----------------------")
+print("corners: ", corners)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(corners):  <class 'numpy.ndarray'>
+----------------------我的分割线1----------------------
+corners.shape:  (4, 2)
+----------------------我的分割线2----------------------
+corners:  [[  0.   0.]
+ [  0. 640.]
+ [427.   0.]
+ [427. 640.]]
+----------------------结束监视代码----------------------
+```
+由此就明白了：**这四个角点的坐标是以图片左上角的点为坐标原点，向右的为x轴正方向，向下的为y轴正方向**。这一点也是一个经验性的积累。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第6行代码是：
+``` python
+warp = np.random.randint(-224, 224, size=(4, 2)).astype(np.float32)
+```
+这一行代码构造了一个名为`warp`（扭曲）的变量。根据名称猜测：这个`warp`变量可能会用于对图片进行随机的扭曲变形处理。我们来测试一下下述代码：
+``` python
+warp = np.random.randint(-224, 224, size=(4, 2)).astype(np.float32)
+print("----------------------开始监视代码----------------------")
+print("type(warp): ", type(warp))
+print("----------------------我的分割线1----------------------")
+print("warp.shape: ", warp.shape)
+print("----------------------我的分割线2----------------------")
+print("warp: ", warp)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为（注意：因为这行代码是构造一个随机的numpy n维数组，所以每次运行的结果是不一样的）：
+```
+----------------------开始监视代码----------------------
+type(warp):  <class 'numpy.ndarray'>
+----------------------我的分割线1----------------------
+warp.shape:  (4, 2)
+----------------------我的分割线2----------------------
+warp:  [[  83.   92.]
+ [ -86.   23.]
+ [  83.  -28.]
+ [ -48. -220.]]
+----------------------结束监视代码----------------------
+```
+这个扭曲数组之后要怎么用，以后再分析。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第7-8行代码是：
+``` python
+# get the corresponding warped image
+M = cv2.getPerspectiveTransform(corners, corners + warp)
+warped = cv2.warpPerspective(
+    src=image, M=M, dsize=(image.shape[1], image.shape[0])
+)  # return an image type
+```
+这两行代码的功能是：构造了一张对原始图像进行了随机**透视变换**后的图片（透视变换的概念以及OpenCV的透视变换的用法参见[【OpenCV3】透视变换——cv::getPerspectiveTransform()与cv::warpPerspective()详解](https://blog.csdn.net/guduruyu/article/details/72518340)）。
+这两行代码中的第一行代码：
+``` python
+M = cv2.getPerspectiveTransform(corners, corners + warp)
+```
+的功能是：计算从`corners`到`corners + warp`的透视变换矩阵。
+这两行代码中的第二行代码：
+``` python
+warped = cv2.warpPerspective(
+    src=image, M=M, dsize=(image.shape[1], image.shape[0])
+)
+```
+的功能是：用上一行活得的透视变换矩阵`M`对图像进行透视变换。
+我们先来测试一下下述代码：
+``` python
+M = cv2.getPerspectiveTransform(corners, corners + warp)
+print("----------------------开始监视代码----------------------")
+print("type(M): ", type(M))
+print("----------------------我的分割线1----------------------")
+print("M.shape: ", M.shape)
+print("----------------------我的分割线2----------------------")
+print("M: ", M)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(M):  <class 'numpy.ndarray'>
+----------------------我的分割线1----------------------
+M.shape:  (3, 3)
+----------------------我的分割线2----------------------
+M:  [[-1.77677415e-01 -2.60082380e-01  2.11000000e+02]
+ [-7.15291579e-01  1.59261192e-01  1.74000000e+02]
+ [-8.96861998e-04 -1.04305880e-03  1.00000000e+00]]
+----------------------结束监视代码----------------------
+```
+可以看到，两张图片的透视变换矩阵是3x3矩阵。
+我们再来看看经过透视变换后的图像的样子。测试下述代码：
+``` python
+warped = cv2.warpPerspective(
+    src=image, M=M, dsize=(image.shape[1], image.shape[0])
+)  # return an image type
+print("----------------------开始监视代码----------------------")
+print("type(warped): ", type(warped))
+print("----------------------我的分割线1----------------------")
+print("warped.shape: ", warped.shape)
+print("----------------------我的分割线2----------------------")
+print("warped: ", warped)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(warped):  <class 'numpy.ndarray'>
+----------------------我的分割线1----------------------
+warped.shape:  (427, 640)
+----------------------我的分割线2----------------------
+warped:  [[59 67 81 ...  0  0  0]
+ [63 72 86 ...  0  0  0]
+ [67 77 91 ...  0  0  0]
+ ...
+ [ 0  0  0 ...  0  0  0]
+ [ 0  0  0 ...  0  0  0]
+ [ 0  0  0 ...  0  0  0]]
+----------------------结束监视代码----------------------
+```
+可以看到，**经过本次构造的透视变换矩阵变换后的图像，和原始的图像有着相同的尺寸**。
+我们一定会很好奇，经过随机透视变换后的图像长什么样子。因此，我们来把经过随机透视变换后的图像可视化出来，看一下效果。首先，在Linux终端中运行下述命令：
+``` bash
+code /data/zitong.yin/coco2014/train2014/COCO_train2014_000000287870.jpg
+```
+在vscode里打开我的Dataloader每次读到的第一张图片（再次提醒，一定要把Dataloader的shuffle设为False，这样才能保证每次读到的第一张图片都是同一长图片。正式训练的时候，再把Dataloader的shuffle设为True）。然后，测试下述代码：
+``` python
+warped = cv2.warpPerspective(
+    src=image, M=M, dsize=(image.shape[1], image.shape[0])
+)  # return an image type
+print("----------------------开始监视代码----------------------")
+cv2.imwrite("img_warped.jpg", warped)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+再在Linux终端里用`code img_warped.jpg`命令打开可视化出来的经过透视变换后的图片。然后，就可以反复在终端里运行`python train.py`命令，来连续地观察不同的随机透视变换的效果了。要想连续地观察不同的随机透视变换的效果，只需要在vscode里保持`img_warped.jpg`这张透视变换后的图片的打开状态就行了。
+可以看到，在本次的随机透视变换中，随机透视变换后的图像是一个灰度图。而且，**随机透视变换后的图像中，对于超出了原始图像范围的像素点，设置为了全黑色**。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第9-10行代码是：
+``` python
+# extract keypoints of the image pair using SIFT
+kp1, descs1 = sift.detectAndCompute(image, None)
+kp2, descs2 = sift.detectAndCompute(warped, None)
+```
+这两行代码的功能是：对原始的图像和经过随机透视变换后的图像，按照SIFT特征点算法来提取特征点和对应的特征向量。我们来看看SIFT算法提取出来的特征点和描述子都长什么样。测试下述代码：
+``` python
+kp1, descs1 = sift.detectAndCompute(image, None)
+print("----------------------开始监视代码----------------------")
+print("type(kp1): ", type(kp1))
+print("----------------------我的分割线1----------------------")
+print("len(kp1): ", len(kp1))
+print("----------------------我的分割线2----------------------")
+print("type(kp1[0]): ", type(kp1[0]))
+print("----------------------我的分割线3----------------------")
+print("kp1[0]: ", kp1[0])
+print("----------------------我的分割线4----------------------")
+print("type(descs1): ", type(descs1))
+print("----------------------我的分割线5----------------------")
+print("descs1.shape: ", descs1.shape)
+print("----------------------我的分割线6----------------------")
+print("descs1: ", descs1)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(kp1):  <class 'tuple'>
+----------------------我的分割线1----------------------
+len(kp1):  395
+----------------------我的分割线2----------------------
+type(kp1[0]):  <class 'cv2.KeyPoint'>
+----------------------我的分割线3----------------------
+kp1[0]:  <KeyPoint 0x7fd1c80a8720>
+----------------------我的分割线4----------------------
+type(descs1):  <class 'numpy.ndarray'>
+----------------------我的分割线5----------------------
+descs1.shape:  (395, 128)
+----------------------我的分割线6----------------------
+descs1:  [[ 5.  0.  0. ...  0.  0.  0.]
+ [34.  0.  0. ...  0.  2. 75.]
+ [ 2.  1.  0. ... 16.  0.  0.]
+ ...
+ [11.  0.  0. ... 54. 24.  3.]
+ [28.  0.  0. ... 10. 17. 13.]
+ [24.  0.  0. ... 85. 10. 14.]]
+----------------------结束监视代码----------------------
+```
+由此就明白了：在本次测试中，对于`/data/zitong.yin/coco2014/train2014/COCO_train2014_000000287870.jpg`这张图像，当设置最大特征点个数为1024时，提取到了395个特征点。这些特征点是`<class 'cv2.KeyPoint'>`类的对象。对这395个特征点，给每个特征点赋予了一个128维特征向量描述子。关于SIFT算法的更多细节，参见[SIFT算法详解](https://blog.csdn.net/zddblog/article/details/7521424)。
