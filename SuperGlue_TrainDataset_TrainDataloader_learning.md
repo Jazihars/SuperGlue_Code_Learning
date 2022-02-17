@@ -1830,7 +1830,7 @@ exit()
 kp1, descs1 = sift.detectAndCompute(image, None)
 kp2, descs2 = sift.detectAndCompute(warped, None)
 ```
-这两行代码的功能是：对原始的图像和经过随机透视变换后的图像，按照SIFT特征点算法来提取特征点和对应的特征向量。我们来看看SIFT算法提取出来的特征点和描述子都长什么样。测试下述代码：
+这两行代码的功能是：对原始的图像和经过随机透视变换后的图像，按照SIFT特征点算法来提取特征点和对应的特征向量（也就是描述子）。我们来看看SIFT算法提取出来的特征点和描述子都长什么样。测试下述代码：
 ``` python
 kp1, descs1 = sift.detectAndCompute(image, None)
 print("----------------------开始监视代码----------------------")
@@ -1874,4 +1874,144 @@ descs1:  [[ 5.  0.  0. ...  0.  0.  0.]
  [24.  0.  0. ... 85. 10. 14.]]
 ----------------------结束监视代码----------------------
 ```
-由此就明白了：在本次测试中，对于`/data/zitong.yin/coco2014/train2014/COCO_train2014_000000287870.jpg`这张图像，当设置最大特征点个数为1024时，提取到了395个特征点。这些特征点是`<class 'cv2.KeyPoint'>`类的对象。对这395个特征点，给每个特征点赋予了一个128维特征向量描述子。关于SIFT算法的更多细节，参见[SIFT算法详解](https://blog.csdn.net/zddblog/article/details/7521424)。
+由此就明白了：在本次测试中，对于`/data/zitong.yin/coco2014/train2014/COCO_train2014_000000287870.jpg`这张图像，当设置最大特征点个数为1024时，提取到了395个特征点。这些**SIFT特征点是`<class 'cv2.KeyPoint'>`类的对象**。对这395个特征点，**给每个SIFT特征点赋予了一个128维的特征向量（这个128维的特征向量被称为描述子）**。关于SIFT算法的更多细节，参见[SIFT算法详解](https://blog.csdn.net/zddblog/article/details/7521424)。关于OpenCV-Python库的`<class 'cv2.KeyPoint'>`类的用法，请参见[cv2.KeyPoint类官方文档](https://docs.opencv.org/4.5.5/d2/d29/classcv_1_1KeyPoint.html)（在这个文档中，请看Python的文档，而不是C++的文档。）
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第11-14行代码是：
+``` python
+# limit the number of keypoints
+kp1_num = min(self.nfeatures, len(kp1))
+kp2_num = min(self.nfeatures, len(kp2))
+kp1 = kp1[:kp1_num]
+kp2 = kp2[:kp2_num]
+```
+这四行代码实现的功能是：按照最开始时设置的最大关键点个数来截取关键点。如果最大关键点个数少于实际检测出来的关键点个数，就把多余的关键点舍弃掉。截取的方式是：只截取关键点元组中前面的关键点，舍弃掉后面的关键点。我们在空白脚本`/SuperGlue-pytorch/test.py`里测试一下下述代码：
+``` python
+mytuple = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+
+shuchutuple = mytuple[:6]
+
+print("mytuple: ", mytuple)
+print("shuchutuple: ", shuchutuple)
+```
+结果为：
+```
+mytuple:  (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+shuchutuple:  (1, 2, 3, 4, 5, 6)
+```
+由此可知：通过python语法`shuchutuple = mytuple[:6]`，可以实现对元组排序靠前的元素的截取。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第15-16行代码是：
+``` python
+kp1_np = np.array([(kp.pt[0], kp.pt[1]) for kp in kp1])
+kp2_np = np.array([(kp.pt[0], kp.pt[1]) for kp in kp2])
+```
+这两行代码的功能是：把关键点的坐标写成一个numpy n维数组。按照[OpenCV-Python的关键点类成员函数pt的文档](https://docs.opencv.org/4.5.5/d2/d29/classcv_1_1KeyPoint.html#ae6b87d798d3e181a472b08fa33883abe)，`kp.pt[0]`代表关键点的横座标，`kp.pt[1]`代表关键点的纵坐标。我们来测试一下下述代码（注意，为了简便，我先暂且在`/SuperGlue-pytorch/train.py`里把最大关键点数设为10）：
+``` python
+kp1_np = np.array([(kp.pt[0], kp.pt[1]) for kp in kp1])
+kp2_np = np.array([(kp.pt[0], kp.pt[1]) for kp in kp2])
+print("----------------------开始监视代码----------------------")
+print("type(kp1_np): ", type(kp1_np))
+print("----------------------我的分割线1----------------------")
+print("kp1_np.shape: ", kp1_np.shape)
+print("----------------------我的分割线2----------------------")
+print("kp1_np: ", kp1_np)
+print("----------------------我的分割线3----------------------")
+print("type(kp2_np): ", type(kp2_np))
+print("----------------------我的分割线4----------------------")
+print("kp2_np.shape: ", kp2_np.shape)
+print("----------------------我的分割线5----------------------")
+print("kp2_np: ", kp2_np)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(kp1_np):  <class 'numpy.ndarray'>
+----------------------我的分割线1----------------------
+kp1_np.shape:  (10, 2)
+----------------------我的分割线2----------------------
+kp1_np:  [[292.19207764 274.21286011]
+ [304.41189575 240.16592407]
+ [288.97460938 211.09049988]
+ [318.21911621 288.21774292]
+ [304.41189575 240.16592407]
+ [292.19207764 274.21286011]
+ [319.99639893 236.58811951]
+ [317.03799438 254.69262695]
+ [319.99639893 236.58811951]
+ [204.59179688 187.15031433]]
+----------------------我的分割线3----------------------
+type(kp2_np):  <class 'numpy.ndarray'>
+----------------------我的分割线4----------------------
+kp2_np.shape:  (10, 2)
+----------------------我的分割线5----------------------
+kp2_np:  [[336.44592285 340.51086426]
+ [323.86486816 260.1328125 ]
+ [283.65115356 229.31295776]
+ [283.65115356 229.31295776]
+ [323.86486816 260.1328125 ]
+ [328.90005493 379.53384399]
+ [370.17724609 401.60266113]
+ [372.9263916  405.48181152]
+ [372.9263916  405.48181152]
+ [355.82583618 375.88891602]]
+----------------------结束监视代码----------------------
+```
+这样就印证了我们从[文档](https://docs.opencv.org/4.5.5/d2/d29/classcv_1_1KeyPoint.html#ae6b87d798d3e181a472b08fa33883abe)中活得的知识：**当`kp`是`<class 'cv2.KeyPoint'>`类的实例时，`kp.pt[0]`代表关键点的横座标，`kp.pt[1]`代表关键点的纵坐标**。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第17-18行代码是：
+``` python
+# skip this image pair if no keypoints detected in image
+if len(kp1) <= 1 or len(kp2) <= 1:
+    return {
+        "keypoints0": torch.zeros([0, 0, 2], dtype=torch.double),
+        "keypoints1": torch.zeros([0, 0, 2], dtype=torch.double),
+        "descriptors0": torch.zeros([0, 2], dtype=torch.double),
+        "descriptors1": torch.zeros([0, 2], dtype=torch.double),
+        "image0": image,
+        "image1": warped,
+        "file_name": file_name,
+    }
+```
+这两行代码规定了：只要原始的图片和随机透视变换后的图片中有一个的关键点数小于等于1，就会直接舍弃掉这张图片的关键点数据。**至于为什么有一个关键的的情况也会被舍弃，这一点我还不是很清楚，需要之后再研究研究**。
+
+关于这里用到的零张量，我们在空白脚本`/SuperGlue-pytorch/test.py`里测试一下下述代码：
+``` python
+import torch
+
+a = torch.zeros([0, 0, 2], dtype=torch.double)
+b = torch.zeros([0, 2], dtype=torch.double)
+
+print("type(a): ", type(a))
+print("a.shape: ", a.shape)
+print("a: ", a)
+print("type(b): ", type(b))
+print("b.shape: ", b.shape)
+print("b: ", b)
+```
+结果为：
+```
+type(a):  <class 'torch.Tensor'>
+a.shape:  torch.Size([0, 0, 2])
+a:  tensor([], size=(0, 0, 2), dtype=torch.float64)
+type(b):  <class 'torch.Tensor'>
+b.shape:  torch.Size([0, 2])
+b:  tensor([], size=(0, 2), dtype=torch.float64)
+```
+由此可知，`torch.zeros([0, 0, 2], dtype=torch.double)`的第一个参数`[0, 0, 2]`指定了零张量的形状，第二个参数`torch.double`指定了数据类型为`torch.float64`。这是一个PyTorch的最最基本的用法，应该记住。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第19-20行代码是：
+``` python
+# confidence of each key point
+scores1_np = np.array([kp.response for kp in kp1])
+scores2_np = np.array([kp.response for kp in kp2])
+```
+这两行代码对每个特征点给出了一个置信度。这里面关键的部分是[kp.response的用法（官方文档）](https://docs.opencv.org/4.5.5/d2/d29/classcv_1_1KeyPoint.html#a1f163ac418c281042e28895b20514360)。我们来测试一下这个关键点的置信度究竟是什么。测试下述代码：
+``` python
+
+```
