@@ -3170,3 +3170,142 @@ return {
 这行代码就是把所有要输出的变量以一个Python字典的形式来输出，用于后续的训练步骤。
 
 至此，SuperGlue网络的训练数据处理部分的代码的语法部分分析完毕。接下来再来重新梳理一遍SuperGlue网络的训练数据处理部分的代码的整个代码逻辑。
+
+## 训练数据集类SparseDataset类的代码逻辑的重新梳理
+在本次SuperGlue的训练中，使用的是[coco2014的训练数据](http://images.cocodataset.org/zips/train2014.zip)（这个链接是coco2014训练数据的下载链接）。因为我们前面已经说过了，本次训练使用的是无标签的coco2014训练数据集图片。因此，我们需要在接下来的代码逻辑重新梳理的过程中重点关注两个问题：
+1. 既然使用的是无标签的coco2014训练数据，那究竟从训练数据中提取到了什么信息？
+2. 整个训练数据处理的逻辑是怎么样的？为什么要使用这样的训练数据处理逻辑？
+
+这两个问题在接下来的分析中将会重点关注。
+接下来我们重新梳理一下SuperGlue网络的整个训练数据集处理部分的代码的逻辑。
+
+### 训练数据集类SparseDataset类的__init__()函数的逻辑梳理
+训练数据集类SparseDataset类的__init__()函数的完整代码是：
+``` python
+def __init__(self, train_path, nfeatures):
+
+    self.files = []
+    self.files += [train_path + f for f in os.listdir(train_path)]
+
+    self.nfeatures = nfeatures
+    self.sift = cv2.SIFT_create(nfeatures=self.nfeatures)
+    self.matcher = cv2.BFMatcher_create(cv2.NORM_L1, crossCheck=False)
+```
+按照之前的分析，**训练数据集类SparseDataset类的__init__()函数干的事情就是：把所有的训练用的无标签图片的绝对路径存储到一个名为self.files的list里。再创建两个和SIFT特征点匹配有关的对象self.sift和self.matcher**。训练数据集类SparseDataset类的__init__()函数的代码的整个逻辑很容易，没有什么特别之处，就是做了一些最基本的训练数据路径的准备和之后要用到的图片处理对象的初始化而已。没有什么特别的难点。
+
+### 训练数据集类SparseDataset类的__len__()函数的逻辑梳理
+训练数据集类SparseDataset类的__len__()函数的完整代码是：
+``` python
+def __len__(self):
+    return len(self.files)
+```
+按照之前的分析，训练数据集类SparseDataset类的__len__()函数所实现的功能就是：**返回本次训练数据的个数**。之前已经看过了，由于本次训练数据使用的是coco2014的训练数据，因此，本次训练中，训练数据集类SparseDataset类的__len__()函数的返回值应为`82783`。这个函数的代码逻辑也十分清晰，没有任何特别之处。就是PyTorch数据集模块的最常规的用法，没有什么需要分析的。
+
+
+### 训练数据集类SparseDataset类的__getitem__()函数的逻辑梳理
+训练数据集类SparseDataset类的__getitem__()函数的完整代码是：
+``` python
+def __getitem__(self, idx):
+    file_name = self.files[idx]
+    image = cv2.imread(file_name, cv2.IMREAD_GRAYSCALE)
+    sift = self.sift
+    width, height = image.shape[:2]
+    corners = np.array(
+        [[0, 0], [0, height], [width, 0], [width, height]], dtype=np.float32
+    )
+    warp = np.random.randint(-224, 224, size=(4, 2)).astype(np.float32)
+
+    # get the corresponding warped image
+    M = cv2.getPerspectiveTransform(corners, corners + warp)
+    warped = cv2.warpPerspective(
+        src=image, M=M, dsize=(image.shape[1], image.shape[0])
+    )  # return an image type
+
+    # extract keypoints of the image pair using SIFT
+    kp1, descs1 = sift.detectAndCompute(image, None)
+    kp2, descs2 = sift.detectAndCompute(warped, None)
+
+    # limit the number of keypoints
+    kp1_num = min(self.nfeatures, len(kp1))
+    kp2_num = min(self.nfeatures, len(kp2))
+    kp1 = kp1[:kp1_num]
+    kp2 = kp2[:kp2_num]
+
+    kp1_np = np.array([(kp.pt[0], kp.pt[1]) for kp in kp1])
+    kp2_np = np.array([(kp.pt[0], kp.pt[1]) for kp in kp2])
+
+    # skip this image pair if no keypoints detected in image
+    if len(kp1) <= 1 or len(kp2) <= 1:
+        return {
+            "keypoints0": torch.zeros([0, 0, 2], dtype=torch.double),
+            "keypoints1": torch.zeros([0, 0, 2], dtype=torch.double),
+            "descriptors0": torch.zeros([0, 2], dtype=torch.double),
+            "descriptors1": torch.zeros([0, 2], dtype=torch.double),
+            "image0": image,
+            "image1": warped,
+            "file_name": file_name,
+        }
+
+    # confidence of each key point
+    scores1_np = np.array([kp.response for kp in kp1])
+    scores2_np = np.array([kp.response for kp in kp2])
+
+    kp1_np = kp1_np[:kp1_num, :]
+    kp2_np = kp2_np[:kp2_num, :]
+    descs1 = descs1[:kp1_num, :]
+    descs2 = descs2[:kp2_num, :]
+
+    # obtain the matching matrix of the image pair
+    matched = self.matcher.match(descs1, descs2)
+    kp1_projected = cv2.perspectiveTransform(kp1_np.reshape((1, -1, 2)), M)[0, :, :]
+    dists = cdist(kp1_projected, kp2_np)
+
+    min1 = np.argmin(dists, axis=0)
+    min2 = np.argmin(dists, axis=1)
+
+    min1v = np.min(dists, axis=1)
+    min1f = min2[min1v < 3]
+
+    xx = np.where(min2[min1] == np.arange(min1.shape[0]))[0]
+    matches = np.intersect1d(min1f, xx)
+
+    missing1 = np.setdiff1d(np.arange(kp1_np.shape[0]), min1[matches])
+    missing2 = np.setdiff1d(np.arange(kp2_np.shape[0]), matches)
+
+    MN = np.concatenate([min1[matches][np.newaxis, :], matches[np.newaxis, :]])
+    MN2 = np.concatenate(
+        [
+            missing1[np.newaxis, :],
+            (len(kp2)) * np.ones((1, len(missing1)), dtype=np.int64),
+        ]
+    )
+    MN3 = np.concatenate(
+        [
+            (len(kp1)) * np.ones((1, len(missing2)), dtype=np.int64),
+            missing2[np.newaxis, :],
+        ]
+    )
+    all_matches = np.concatenate([MN, MN2, MN3], axis=1)
+
+    kp1_np = kp1_np.reshape((1, -1, 2))
+    kp2_np = kp2_np.reshape((1, -1, 2))
+    descs1 = np.transpose(descs1 / 256.0)
+    descs2 = np.transpose(descs2 / 256.0)
+
+    image = torch.from_numpy(image / 255.0).double()[None].cuda()
+    warped = torch.from_numpy(warped / 255.0).double()[None].cuda()
+
+    return {
+        "keypoints0": list(kp1_np),
+        "keypoints1": list(kp2_np),
+        "descriptors0": list(descs1),
+        "descriptors1": list(descs2),
+        "scores0": list(scores1_np),
+        "scores1": list(scores2_np),
+        "image0": image,
+        "image1": warped,
+        "all_matches": list(all_matches),
+        "file_name": file_name,
+    }
+```
+这个函数的代码逻辑是比较复杂的，需要重点分析。
