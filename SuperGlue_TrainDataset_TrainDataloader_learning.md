@@ -2927,3 +2927,246 @@ y:  [10 20 30 40 50]
 xx = np.where(min2[min1] == np.arange(min1.shape[0]))[0]
 ```
 这行代码的关键是`np.where()`函数的用法。
+参考[numpy.where()函数官方文档](https://numpy.org/doc/stable/reference/generated/numpy.where.html)，如果仅仅给定一个条件`condition`的话，`numpy.where(condition)`的行为和`np.asarray(condition).nonzero()`一样。我们在空白脚本中测试一下下述代码：
+``` python
+import numpy as np
+
+x = np.array([10, 20, 30, 40, 50, 60, 70, 80, 90])
+
+print("np.where(x > 40): ", np.where(x > 40))
+print("np.where(x > 40)[0]: ", np.where(x > 40)[0])
+print("np.where(x < 60): ", np.where(x < 60))
+print("np.where(x < 60)[0]: ", np.where(x < 60)[0])
+print("np.where(x == 50): ", np.where(x == 50))
+print("np.where(x == 50)[0]: ", np.where(x == 50)[0])
+print("type(np.where(x == 50)[0]): ", type(np.where(x == 50)[0]))
+```
+结果为：
+```
+np.where(x > 40):  (array([4, 5, 6, 7, 8]),)
+np.where(x > 40)[0]:  [4 5 6 7 8]
+np.where(x < 60):  (array([0, 1, 2, 3, 4]),)
+np.where(x < 60)[0]:  [0 1 2 3 4]
+np.where(x == 50):  (array([4]),)
+np.where(x == 50)[0]:  [4]
+type(np.where(x == 50)[0]):  <class 'numpy.ndarray'>
+```
+由此可见，**`np.where(condition)`函数的功能是：返回`condition`中值为`True`的那些`condition`数组中的元素的索引**。
+我们在原始的代码中，看一下`np.where(condition)`函数中的`condition`究竟是什么，并看一下`np.where()`函数的执行结果。测试下述代码（注意：最大关键点数设为10）：
+``` python
+print("----------------------开始监视代码----------------------")
+print("min1: ", min1)
+print("----------------------我的分割线1----------------------")
+print("min2: ", min2)
+print("----------------------我的分割线2----------------------")
+print("min2[min1]: ", min2[min1])
+print("----------------------我的分割线3----------------------")
+print("np.arange(min1.shape[0]): ", np.arange(min1.shape[0]))
+print("----------------------我的分割线4----------------------")
+print(min2[min1] == np.arange(min1.shape[0]))
+
+print("----------------------开始执行这行代码----------------------")
+xx = np.where(min2[min1] == np.arange(min1.shape[0]))[0]
+print("----------------------结束执行这行代码----------------------")
+
+print("xx: ", xx)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+min1:  [6 3 3 2 2 6 1 3 1 3]
+----------------------我的分割线1----------------------
+min2:  [7 6 4 7 6 7 0 0 0 3]
+----------------------我的分割线2----------------------
+min2[min1]:  [0 7 7 4 4 0 6 7 6 7]
+----------------------我的分割线3----------------------
+np.arange(min1.shape[0]):  [0 1 2 3 4 5 6 7 8 9]
+----------------------我的分割线4----------------------
+[ True False False False  True False  True  True False False]
+----------------------开始执行这行代码----------------------
+----------------------结束执行这行代码----------------------
+xx:  [0 4 6 7]
+----------------------结束监视代码----------------------
+```
+这样看就很显然了：`min2[min1]`的含义是对`min2`以`min1`的值为索引来取出`min2`的元素。两个维度相同的numpy数组比较`==`的结果是一个同样维度的numpy数组，保存每个对应索引的比较结果`True`或`False`。最后`np.where(min2[min1] == np.arange(min1.shape[0]))`的输出结果就是逻辑表达式`min2[min1] == np.arange(min1.shape[0])`的值为`True`的那些**索引**。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第34行代码是：
+``` python
+matches = np.intersect1d(min1f, xx)
+```
+这行代码的关键部分是`np.intersect1d()`函数的用法，参考[numpy.intersect1d()函数官方文档](https://numpy.org/doc/stable/reference/generated/numpy.intersect1d.html)可知，这个函数就是在求两个numpy数组的交集。我们来测试一下下述代码：
+``` python
+print("----------------------开始监视代码----------------------")
+print("min1f: ", min1f)
+print("----------------------我的分割线1----------------------")
+print("xx: ", xx)
+
+print("----------------------开始执行这行代码----------------------")
+matches = np.intersect1d(min1f, xx)
+print("----------------------结束执行这行代码----------------------")
+print("matches: ", matches)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+min1f:  [2 4 1 2 8]
+----------------------我的分割线1----------------------
+xx:  [1 2 3 4 8]
+----------------------开始执行这行代码----------------------
+----------------------结束执行这行代码----------------------
+matches:  [1 2 4 8]
+----------------------结束监视代码----------------------
+```
+可以看到，正如[numpy.intersect1d()函数官方文档](https://numpy.org/doc/stable/reference/generated/numpy.intersect1d.html)中所描述的，返回的交集中的元素是按从小到大排好序的。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第34行代码是：
+``` python
+missing1 = np.setdiff1d(np.arange(kp1_np.shape[0]), min1[matches])
+```
+这行代码的关键是`np.setdiff1d()`函数，参考[np.setdiff1d()函数官方文档](https://numpy.org/doc/stable/reference/generated/numpy.setdiff1d.html)。`np.setdiff1d()`函数的功能是：求两个集合的差集。所以，这个函数自身的功能没有什么困难之处。**真正需要弄清楚的是：为什么要求`np.arange(kp1_np.shape[0])`和`min1[matches]`这两个集合的差集？** 对于这个问题，我目前暂时还不是很清楚。等之后再重新梳理一遍整个代码的逻辑，应该会有所帮助。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第35行代码是：
+``` python
+missing2 = np.setdiff1d(np.arange(kp2_np.shape[0]), matches)
+```
+这行代码的用法和上一行代码完全一样。此处不再赘述。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第36行代码是：
+``` python
+MN = np.concatenate([min1[matches][np.newaxis, :], matches[np.newaxis, :]])
+```
+这行代码的核心是`np.concatenate()`函数，参见[numpy.concatenate()函数官方文档](https://numpy.org/doc/stable/reference/generated/numpy.concatenate.html)。`np.concatenate()`函数的功能是：在一个给定的维度上拼接多个numpy数组。特别需要留意一下[numpy.concatenate()函数官方文档](https://numpy.org/doc/stable/reference/generated/numpy.concatenate.html)中所给出的例子，能够加深理解。我们来测试一下下述代码：
+``` python
+print("----------------------开始监视代码----------------------")
+print("min1[matches][np.newaxis, :]: ", min1[matches][np.newaxis, :])
+print("----------------------我的分割线1----------------------")
+print("matches[np.newaxis, :]: ", matches[np.newaxis, :])
+print("----------------------我的分割线2----------------------")
+print(
+    "[min1[matches][np.newaxis, :], matches[np.newaxis, :]]: ",
+    [min1[matches][np.newaxis, :], matches[np.newaxis, :]],
+)
+
+print("----------------------开始执行这行代码----------------------")
+MN = np.concatenate([min1[matches][np.newaxis, :], matches[np.newaxis, :]])
+print("----------------------结束执行这行代码----------------------")
+
+print("MN: ", MN)
+print("----------------------我的分割线3----------------------")
+print("MN.shape: ", MN.shape)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+min1[matches][np.newaxis, :]:  [[2 6 3 1 7]]
+----------------------我的分割线1----------------------
+matches[np.newaxis, :]:  [[1 3 6 7 9]]
+----------------------我的分割线2----------------------
+[min1[matches][np.newaxis, :], matches[np.newaxis, :]]:  [array([[2, 6, 3, 1, 7]]), array([[1, 3, 6, 7, 9]])]
+----------------------开始执行这行代码----------------------
+----------------------结束执行这行代码----------------------
+MN:  [[2 6 3 1 7]
+ [1 3 6 7 9]]
+----------------------我的分割线3----------------------
+MN.shape:  (2, 5)
+----------------------结束监视代码----------------------
+```
+可以看到，对于`np.concatenate()`函数，如果不给定在哪个维度来拼接，就是默认在第0个维度进行拼接。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第37-38行代码是：
+``` python
+MN2 = np.concatenate(
+    [
+        missing1[np.newaxis, :],
+        (len(kp2)) * np.ones((1, len(missing1)), dtype=np.int64),
+    ]
+)
+MN3 = np.concatenate(
+    [
+        (len(kp1)) * np.ones((1, len(missing2)), dtype=np.int64),
+        missing2[np.newaxis, :],
+    ]
+)
+```
+这两行代码的含义与上一行一样。最关键的不是语法上的难度，而是要搞清楚：为什么要进行这样的拼接？这个问题之后我重新梳理一下整个代码的逻辑，再来回答。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第39行代码是：
+``` python
+all_matches = np.concatenate([MN, MN2, MN3], axis=1)
+```
+这行代码的用法完全同上。我们来看一下最终得出的`all_matches`数组的效果。测试下述代码：
+``` python
+all_matches = np.concatenate([MN, MN2, MN3], axis=1)
+print("----------------------开始监视代码----------------------")
+print("all_matches.shape: ", all_matches.shape)
+print("----------------------我的分割线1----------------------")
+print("all_matches: ", all_matches)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+all_matches.shape:  (2, 20)
+----------------------我的分割线1----------------------
+all_matches:  [[ 0  1  2  3  4  5  6  7  8  9 10 10 10 10 10 10 10 10 10 10]
+ [10 10 10 10 10 10 10 10 10 10  0  1  2  3  4  5  6  7  8  9]]
+----------------------结束监视代码----------------------
+```
+一会我再来重新梳理整个代码的逻辑。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第40-41行代码是：
+``` python
+kp1_np = kp1_np.reshape((1, -1, 2))
+kp2_np = kp2_np.reshape((1, -1, 2))
+```
+这两行代码就是把`kp1_np`和`kp2_np`这两个储存了关键点坐标的numpy数组调整一下形状，以备输出而已。没有什么特别之处。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第42-43行代码是：
+``` python
+descs1 = np.transpose(descs1 / 256.0)
+descs2 = np.transpose(descs2 / 256.0)
+```
+这两行代码是对描述子向量做一个标准化和转置，以备输出。关于`np.transpose()`的用法参见[numpy.transpose()函数官方文档](https://numpy.org/doc/stable/reference/generated/numpy.transpose.html)。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第44-45行代码是：
+``` python
+image = torch.from_numpy(image / 255.0).double()[None].cuda()
+warped = torch.from_numpy(warped / 255.0).double()[None].cuda()
+```
+这两行代码就是把原始的图像和经过透视变换后的图像从numpy数组的数据类型转换成torch张量的数据类型，并移动到cuda上，以备输出。
+
+---
+训练数据集类SparseDataset类的__getitem__()函数的第46行代码是：
+``` python
+return {
+    "keypoints0": list(kp1_np),
+    "keypoints1": list(kp2_np),
+    "descriptors0": list(descs1),
+    "descriptors1": list(descs2),
+    "scores0": list(scores1_np),
+    "scores1": list(scores2_np),
+    "image0": image,
+    "image1": warped,
+    "all_matches": list(all_matches),
+    "file_name": file_name,
+}
+```
+这行代码就是把所有要输出的变量以一个Python字典的形式来输出，用于后续的训练步骤。
+
+至此，SuperGlue网络的训练数据处理部分的代码的语法部分分析完毕。接下来再来重新梳理一遍SuperGlue网络的训练数据处理部分的代码的整个代码逻辑。
