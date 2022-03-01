@@ -1660,6 +1660,11 @@ height:  640
 ```
 可以看到，`width`和`height`是两个整数。
 
+2022.3.1补充：这行代码有错误，应该修改为如下这样子：
+``` python
+height, width = image.shape[:2]
+```
+
 ---
 训练数据集类SparseDataset类的__getitem__()函数的第5行代码是：
 ``` python
@@ -1749,7 +1754,7 @@ warped = cv2.warpPerspective(
     src=image, M=M, dsize=(image.shape[1], image.shape[0])
 )
 ```
-的功能是：用上一行活得的透视变换矩阵`M`对图像进行透视变换。
+的功能是：用上一行获得的透视变换矩阵`M`对图像进行透视变换。
 我们先来测试一下下述代码：
 ``` python
 M = cv2.getPerspectiveTransform(corners, corners + warp)
@@ -1963,7 +1968,7 @@ descs2:  [[ 3. 16. 49. ...  0.  3.  5.]
  [44.  0.  0. ...  0.  0.  0.]]
 ----------------------结束监视代码----------------------
 ```
-可以看到，如果设置最大关键点数为10，则对本次测试的这一张图片，关键点和描述子都只有10个。
+可以看到，如果设置最大关键点数为10，则对本次测试的这一对图像（原始图像和经过透视变换后的图像），都只有10个关键点。
 
 
 ---
@@ -2050,7 +2055,7 @@ kp2_np:  [[336.44592285 340.51086426]
  [355.82583618 375.88891602]]
 ----------------------结束监视代码----------------------
 ```
-这样就印证了我们从[文档](https://docs.opencv.org/4.5.5/d2/d29/classcv_1_1KeyPoint.html#ae6b87d798d3e181a472b08fa33883abe)中活得的知识：**当`kp`是`<class 'cv2.KeyPoint'>`类的实例时，`kp.pt[0]`代表关键点的横座标，`kp.pt[1]`代表关键点的纵坐标**。
+这样就印证了我们从[文档](https://docs.opencv.org/4.5.5/d2/d29/classcv_1_1KeyPoint.html#ae6b87d798d3e181a472b08fa33883abe)中获得的知识：**当`kp`是`<class 'cv2.KeyPoint'>`类的实例时，`kp.pt[0]`代表关键点的横座标，`kp.pt[1]`代表关键点的纵坐标**。
 
 ---
 训练数据集类SparseDataset类的__getitem__()函数的第17-18行代码是：
@@ -2161,7 +2166,7 @@ scores2_np:  [0.07748456 0.09784605 0.08550339 0.08595079 0.08953463 0.08255975
  0.06843098 0.07271964 0.07528766 0.06779678]
 ----------------------结束监视代码----------------------
 ```
-意料之中，因为在本次测试中，我设置了最大关键点个数是10，因此，`scores1_np`和`scores2_np`都是10维的numpy数组，它们给每个关键点赋予了一个置信度值。
+意料之中，因为在本次测试中，我设置了最大关键点个数是10，因此，`scores1_np`和`scores2_np`都是10维的numpy数组，它们给每个关键点赋予了一个置信度值。这个置信度就是`kp.response`的值。
 
 ---
 训练数据集类SparseDataset类的__getitem__()函数的第21-24行代码是：
@@ -3309,3 +3314,120 @@ def __getitem__(self, idx):
     }
 ```
 这个函数的代码逻辑是比较复杂的，需要重点分析。
+
+首先，我们来看训练数据集类SparseDataset类的__getitem__()函数的前面一段的代码：
+``` python
+def __getitem__(self, idx):
+    file_name = self.files[idx]
+    image = cv2.imread(file_name, cv2.IMREAD_GRAYSCALE)
+    sift = self.sift
+    width, height = image.shape[:2]
+    corners = np.array(
+        [[0, 0], [0, height], [width, 0], [width, height]], dtype=np.float32
+    )
+    warp = np.random.randint(-224, 224, size=(4, 2)).astype(np.float32)
+
+    # get the corresponding warped image
+    M = cv2.getPerspectiveTransform(corners, corners + warp)
+    warped = cv2.warpPerspective(
+        src=image, M=M, dsize=(image.shape[1], image.shape[0])
+    )  # return an image type
+
+    # extract keypoints of the image pair using SIFT
+    kp1, descs1 = sift.detectAndCompute(image, None)
+    kp2, descs2 = sift.detectAndCompute(warped, None)
+
+    # limit the number of keypoints
+    kp1_num = min(self.nfeatures, len(kp1))
+    kp2_num = min(self.nfeatures, len(kp2))
+    kp1 = kp1[:kp1_num]
+    kp2 = kp2[:kp2_num]
+
+    kp1_np = np.array([(kp.pt[0], kp.pt[1]) for kp in kp1])
+    kp2_np = np.array([(kp.pt[0], kp.pt[1]) for kp in kp2])
+
+    # skip this image pair if no keypoints detected in image
+    if len(kp1) <= 1 or len(kp2) <= 1:
+        return {
+            "keypoints0": torch.zeros([0, 0, 2], dtype=torch.double),
+            "keypoints1": torch.zeros([0, 0, 2], dtype=torch.double),
+            "descriptors0": torch.zeros([0, 2], dtype=torch.double),
+            "descriptors1": torch.zeros([0, 2], dtype=torch.double),
+            "image0": image,
+            "image1": warped,
+            "file_name": file_name,
+        }
+
+    # confidence of each key point
+    scores1_np = np.array([kp.response for kp in kp1])
+    scores2_np = np.array([kp.response for kp in kp2])
+
+    kp1_np = kp1_np[:kp1_num, :]
+    kp2_np = kp2_np[:kp2_num, :]
+    descs1 = descs1[:kp1_num, :]
+    descs2 = descs2[:kp2_num, :]
+```
+这些代码整体上来讲，就是：**对一个图像执行一个随机的透视变换，并对原始图像和经过随机透视变换后的图像提取SIFT特征点和描述子**。具体的细节，之前已经分析过了，在此不再赘述。
+
+省略掉一行没有被用到的代码`matched = self.matcher.match(descs1, descs2)`，训练数据集类SparseDataset类的__getitem__()函数的接下来的代码是：
+``` python
+kp1_projected = cv2.perspectiveTransform(kp1_np.reshape((1, -1, 2)), M)[0, :, :]
+dists = cdist(kp1_projected, kp2_np)
+
+min1 = np.argmin(dists, axis=0)
+min2 = np.argmin(dists, axis=1)
+
+min1v = np.min(dists, axis=1)
+min1f = min2[min1v < 3]
+
+xx = np.where(min2[min1] == np.arange(min1.shape[0]))[0]
+matches = np.intersect1d(min1f, xx)
+
+missing1 = np.setdiff1d(np.arange(kp1_np.shape[0]), min1[matches])
+missing2 = np.setdiff1d(np.arange(kp2_np.shape[0]), matches)
+
+MN = np.concatenate([min1[matches][np.newaxis, :], matches[np.newaxis, :]])
+MN2 = np.concatenate(
+    [
+        missing1[np.newaxis, :],
+        (len(kp2)) * np.ones((1, len(missing1)), dtype=np.int64),
+    ]
+)
+MN3 = np.concatenate(
+    [
+        (len(kp1)) * np.ones((1, len(missing2)), dtype=np.int64),
+        missing2[np.newaxis, :],
+    ]
+)
+all_matches = np.concatenate([MN, MN2, MN3], axis=1)
+```
+这段代码是整个这个训练数据集类SparseDataset类的__getitem__()函数中，最让我感到困惑的代码。这段代码整体来讲，我还是不太理解它究竟做了什么。只能等之后对模型本身有了一个更深入的理解之后，再来搞懂这段代码在做什么了。我目前只知道，这段代码构造了一个名为`all_matches`的numpy数组，最后输出以供后续输入到模型中来训练。
+
+训练数据集类SparseDataset类的__getitem__()函数的剩余的代码是：
+``` python
+kp1_np = kp1_np.reshape((1, -1, 2))
+kp2_np = kp2_np.reshape((1, -1, 2))
+descs1 = np.transpose(descs1 / 256.0)
+descs2 = np.transpose(descs2 / 256.0)
+
+image = torch.from_numpy(image / 255.0).double()[None].cuda()
+warped = torch.from_numpy(warped / 255.0).double()[None].cuda()
+
+return {
+    "keypoints0": list(kp1_np),
+    "keypoints1": list(kp2_np),
+    "descriptors0": list(descs1),
+    "descriptors1": list(descs2),
+    "scores0": list(scores1_np),
+    "scores1": list(scores2_np),
+    "image0": image,
+    "image1": warped,
+    "all_matches": list(all_matches),
+    "file_name": file_name,
+}
+```
+这段代码没有什么好说的，就是对要输出的关键点、描述子、原始图像和经过透视变换后的图像做了一些标准化处理而已。
+
+综上所述，**在本次训练中，SuperGlue网络使用的训练数据是：对原始的无标签图像做了一个随机的透视变换后，从这一对图像中提取出来的SIFT特征点和描述子。**
+
+至此，SuperGlue网络的训练数据处理部分的代码的研究，暂时告一段落。
