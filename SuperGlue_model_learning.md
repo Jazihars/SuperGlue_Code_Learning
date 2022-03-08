@@ -382,7 +382,7 @@ self.kenc = KeypointEncoder(
     self.config["descriptor_dim"], self.config["keypoint_encoder"]
 )
 ```
-从这一行代码开始，第三方训练脚本使用的SuperGlue模型类的初始化函数__init__(self, config)就开始构造SuperGlue网络的各个模块了。这一行代码构造了关键点编码器模块。我们来看一下关键点编码器类的完整定义（这个类的定义位于`/SuperGlue-pytorch/models/superglue.py`脚本里）：
+从这一行代码开始，第三方训练脚本使用的SuperGlue模型类的初始化函数__init__(self, config)就开始构造SuperGlue网络的各个模块了。这一行代码构造了SuperGlue网络的第1个模块：**关键点编码器KeypointEncoder模块**。我们来看一下关键点编码器类的完整定义（这个类的定义位于`/SuperGlue-pytorch/models/superglue.py`脚本里）：
 ``` python
 class KeypointEncoder(nn.Module):
     """Joint encoding of visual appearance and location using MLPs"""
@@ -676,3 +676,391 @@ tensor([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
 可以看到，**`torch.nn.init.constant_(tensor, val)`函数的作用就是：将`tensor`张量中的所有值都设为`val`，不改变`tensor`张量的形状。** 至于为什么需要把关键点编码器的最后一层的偏置设为0，这个我目前还不是很清楚。之后再研究。
 由于现在还不涉及到使用SuperGlue模型进行推理的过程，因此，我暂时先略过模型的`def forward()`函数。之后等用到模型推理的时候，再来分析模型的`def forward()`函数。
 
+至此，我们已经详细地分析了关键点编码器的构造过程。我们来看看构造的这个关键点编码器的完整样子。在`/SuperGlue-pytorch/models/superglue.py`脚本中的`class SuperGlue(nn.Module): def __init__(self, config):`函数中，测试如下的代码：
+``` python
+self.kenc = KeypointEncoder(
+    self.config["descriptor_dim"], self.config["keypoint_encoder"]
+)
+print("----------------------开始监视代码----------------------")
+print("type(self.kenc): ", type(self.kenc))
+print("----------------------我的分割线1----------------------")
+print("self.kenc: ", self.kenc)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(self.kenc):  <class 'models.superglue.KeypointEncoder'>
+----------------------我的分割线1----------------------
+self.kenc:  KeypointEncoder(
+  (encoder): Sequential(
+    (0): Conv1d(3, 32, kernel_size=(1,), stride=(1,))
+    (1): InstanceNorm1d(32, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+    (2): ReLU()
+    (3): Conv1d(32, 64, kernel_size=(1,), stride=(1,))
+    (4): InstanceNorm1d(64, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+    (5): ReLU()
+    (6): Conv1d(64, 128, kernel_size=(1,), stride=(1,))
+    (7): InstanceNorm1d(128, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+    (8): ReLU()
+    (9): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+  )
+)
+----------------------结束监视代码----------------------
+```
+总结一下：关键点编码器`self.kenc`其实就是一个多层感知机。只不过最后一层128维的偏置值被置为了0
+
+---
+第三方训练脚本使用的SuperGlue模型类的初始化函数__init__(self, config)的第4行代码如下：
+``` python
+self.gnn = AttentionalGNN(
+    self.config["descriptor_dim"], self.config["GNN_layers"]
+)
+```
+这一行代码构造了SuperGlue网络的第2个模块：**基于注意力机制的图神经网络AttentionalGNN模块**。这次我们采用和上面的关键点编码器模块不一样的顺序来分析。我们先来整体地看一下这个网络层长什么样子。在`/SuperGlue-pytorch/models/superglue.py`脚本中的`class SuperGlue(nn.Module): def __init__(self, config):`函数中，测试如下的代码：
+``` python
+self.gnn = AttentionalGNN(
+    self.config["descriptor_dim"], self.config["GNN_layers"]
+)
+print("----------------------开始监视代码----------------------")
+print("type(self.gnn): ", type(self.gnn))
+print("----------------------我的分割线1----------------------")
+print("self.gnn: ", self.gnn)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(self.gnn):  <class 'models.superglue.AttentionalGNN'>
+----------------------我的分割线1----------------------
+self.gnn:  AttentionalGNN(
+  (layers): ModuleList(
+    (0): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (1): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (2): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (3): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (4): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (5): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (6): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (7): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (8): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (9): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (10): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (11): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (12): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (13): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (14): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (15): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (16): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (17): AttentionalPropagation(
+      (attn): MultiHeadedAttention(
+        (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (proj): ModuleList(
+          (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (mlp): Sequential(
+        (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+        (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+        (2): ReLU()
+        (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+  )
+)
+----------------------结束监视代码----------------------
+```
+可以看到，这个基于注意力机制的图神经网络层`self.gnn`比之前的关键点编码器层`self.kenc`要复杂多了。我们接下来要仔细地分析，逐行弄懂这个基于注意力机制的图神经网络层`self.gnn`的构造细节。
+
+首先，我们来看看构造这个基于注意力机制的图神经网络层`self.gnn`使用了哪些输入。在`/SuperGlue-pytorch/models/superglue.py`脚本中的`class SuperGlue(nn.Module): def __init__(self, config):`函数中，测试如下的代码：
+``` python
+print("----------------------开始监视代码----------------------")
+print(
+    'type(self.config["descriptor_dim"]): ', type(self.config["descriptor_dim"])
+)
+print("----------------------我的分割线1----------------------")
+print('self.config["descriptor_dim"]: ', self.config["descriptor_dim"])
+print("----------------------我的分割线2----------------------")
+print('type(self.config["GNN_layers"]): ', type(self.config["GNN_layers"]))
+print("----------------------我的分割线3----------------------")
+print('self.config["GNN_layers"]: ', self.config["GNN_layers"])
+print("----------------------结束监视代码----------------------")
+exit()
+self.gnn = AttentionalGNN(
+    self.config["descriptor_dim"], self.config["GNN_layers"]
+)
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(self.config["descriptor_dim"]):  <class 'int'>
+----------------------我的分割线1----------------------
+self.config["descriptor_dim"]:  128
+----------------------我的分割线2----------------------
+type(self.config["GNN_layers"]):  <class 'list'>
+----------------------我的分割线3----------------------
+self.config["GNN_layers"]:  ['self', 'cross', 'self', 'cross', 'self', 'cross', 'self', 'cross', 'self', 'cross', 'self', 'cross', 'self', 'cross', 'self', 'cross', 'self', 'cross']
+----------------------结束监视代码----------------------
+```
+构造SuperGlue网络使用的这个`self.config`字典之前已经打印出来了。这里就是用这个字典中的两个键`"descriptor_dim"`和`"GNN_layers"`的值来构造SuperGlue网络最关键的层：基于注意力机制的图神经网络层`self.gnn`。
+
+接下来我们进入`AttentionalGNN`类的代码，
