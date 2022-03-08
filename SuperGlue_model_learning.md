@@ -1,7 +1,7 @@
 # SuperGlue模型部分的代码学习
 在这个笔记中，我将逐行阅读[SuperGlue模型部分的代码](https://github.com/HeatherJiaZG/SuperGlue-pytorch/blob/master/models/superglue.py)，弄懂SuperGlue模型究竟是怎么实现的。
 
-## 从训练脚本中进入模型部分的代码
+## 从训练脚本中进入模型部分的代码——模型构造
 在[SuperGlue的第三方训练脚本](https://github.com/HeatherJiaZG/SuperGlue-pytorch/blob/master/train.py)`/SuperGlue-pytorch/train.py`中，可以看到这样的几行代码（注意：我的代码经过了Python第三方包black的强制格式化，所以与Github上原始作者的代码格式不同。）：
 ``` python
 config = {
@@ -72,7 +72,7 @@ config.get("superglue", {}):  {'weights': 'indoor', 'sinkhorn_iterations': 20, '
 
 接下来我们进入SuperGlue模型的内部，来详细地研究一下SuperGlue模型的实现细节。
 
-## SuperGlue模型部分的代码逐行分析
+## SuperGlue模型构造部分的代码逐行分析
 从SuperGlue的训练脚本`/SuperGlue-pytorch/train.py`中的模型初始化代码
 ``` python
 superglue = SuperGlue(config.get("superglue", {}))
@@ -397,3 +397,282 @@ class KeypointEncoder(nn.Module):
         return self.encoder(torch.cat(inputs, dim=1))
 ```
 可以看到，SuperGlue的关键点编码器`KeypointEncoder`模块的构造函数接收两个输入。第一个输入`feature_dim`从名称来推断，应该是一个整数，表示特征维度。在本次训练中，实际传入的值是`128`（参见之前的打印输出`'descriptor_dim': 128`）。第二个输入`layers`从名称来推断，应该表示的是关键点编码器的层。在本次训练中，实际传入的值是`[32, 64, 128]`（参见之前的打印输出`'keypoint_encoder': [32, 64, 128]`）。
+
+经过与[SuperGlue官方模型的class KeypointEncoder(nn.Module):代码](https://github.com/magicleap/SuperGluePretrainedNetwork/blob/master/models/superglue.py#L75)的对比发现，第三方实现的`class KeypointEncoder(nn.Module)`类与官方实现的`class KeypointEncoder(nn.Module)`类完全一样。在这个类中，没有代码的更改。
+
+我们先来看看`class KeypointEncoder(nn.Module)`类的构造函数做了什么事情。先来看看`KeypointEncoder`类的构造函数中传入的列表长什么样子。测试一下下述代码：
+``` python
+class KeypointEncoder(nn.Module):
+    """Joint encoding of visual appearance and location using MLPs"""
+
+    def __init__(self, feature_dim, layers):
+        super().__init__()
+
+        print("----------------------开始监视代码----------------------")
+        print(
+            "type([3] + layers + [feature_dim]): ", type([3] + layers + [feature_dim])
+        )
+        print("----------------------我的分割线1----------------------")
+        print("[3] + layers + [feature_dim]: ", [3] + layers + [feature_dim])
+        print("----------------------结束监视代码----------------------")
+        exit()
+
+        self.encoder = MLP([3] + layers + [feature_dim])
+        nn.init.constant_(self.encoder[-1].bias, 0.0)
+
+    def forward(self, kpts, scores):
+        inputs = [kpts.transpose(1, 2), scores.unsqueeze(1)]
+        return self.encoder(torch.cat(inputs, dim=1))
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type([3] + layers + [feature_dim]):  <class 'list'>
+----------------------我的分割线1----------------------
+[3] + layers + [feature_dim]:  [3, 32, 64, 128, 128]
+----------------------结束监视代码----------------------
+```
+也就是说，`KeypointEncoder`类的构造函数使用一个列表构造了一个多层感知机。我们来看看这个多层感知机长什么样子。`self.encoder = MLP([3] + layers + [feature_dim])`这行代码中的MLP类的完整代码是（位于`/SuperGlue-pytorch/models/superglue.py`里）：
+``` python
+def MLP(channels: list, do_bn=True):
+    """Multi-layer perceptron"""
+    n = len(channels)
+    layers = []
+    for i in range(1, n):
+        layers.append(nn.Conv1d(channels[i - 1], channels[i], kernel_size=1, bias=True))
+        if i < (n - 1):
+            if do_bn:
+                # layers.append(nn.BatchNorm1d(channels[i]))
+                layers.append(nn.InstanceNorm1d(channels[i]))
+            layers.append(nn.ReLU())
+    return nn.Sequential(*layers)
+```
+与官方SuperGlue模型对比后发现，唯一的区别在注释掉的`# layers.append(nn.BatchNorm1d(channels[i]))`这一行代码上。官方SuperGlue模型使用的是注释掉的这一行代码，而第三方实现对这一行代码进行了修改，把`BatchNorm1d`换成了`InstanceNorm1d`。对于这个多层感知机的代码，没有什么特别的难点，就是构造多层感知机的常规操作。我们只需要看看这个多层感知机的结构就可以了。测试下述代码：
+``` python
+def MLP(channels: list, do_bn=True):
+    """Multi-layer perceptron"""
+    n = len(channels)
+    layers = []
+    for i in range(1, n):
+        layers.append(nn.Conv1d(channels[i - 1], channels[i], kernel_size=1, bias=True))
+        if i < (n - 1):
+            if do_bn:
+                # layers.append(nn.BatchNorm1d(channels[i]))
+                layers.append(nn.InstanceNorm1d(channels[i]))
+            layers.append(nn.ReLU())
+    print("----------------------开始监视代码----------------------")
+    for temp in layers:
+        print(temp)
+    print("----------------------结束监视代码----------------------")
+    exit()
+    return nn.Sequential(*layers)
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+Conv1d(3, 32, kernel_size=(1,), stride=(1,))
+InstanceNorm1d(32, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+ReLU()
+Conv1d(32, 64, kernel_size=(1,), stride=(1,))
+InstanceNorm1d(64, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+ReLU()
+Conv1d(64, 128, kernel_size=(1,), stride=(1,))
+InstanceNorm1d(128, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+ReLU()
+Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+----------------------结束监视代码----------------------
+```
+由此，这个多层感知机的结构就一目了然了。我们再来看看最终这个构造好了的多层感知机对象是什么类型的。测试下述代码：
+``` python
+class KeypointEncoder(nn.Module):
+    """Joint encoding of visual appearance and location using MLPs"""
+
+    def __init__(self, feature_dim, layers):
+        super().__init__()
+
+        self.encoder = MLP([3] + layers + [feature_dim])
+        print("----------------------开始监视代码----------------------")
+        print("type(self.encoder): ", type(self.encoder))
+        print("----------------------我的分割线1----------------------")
+        print("self.encoder: ", self.encoder)
+        print("----------------------结束监视代码----------------------")
+        exit()
+
+        nn.init.constant_(self.encoder[-1].bias, 0.0)
+
+    def forward(self, kpts, scores):
+        inputs = [kpts.transpose(1, 2), scores.unsqueeze(1)]
+        return self.encoder(torch.cat(inputs, dim=1))
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(self.encoder):  <class 'torch.nn.modules.container.Sequential'>
+----------------------我的分割线1----------------------
+self.encoder:  Sequential(
+  (0): Conv1d(3, 32, kernel_size=(1,), stride=(1,))
+  (1): InstanceNorm1d(32, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+  (2): ReLU()
+  (3): Conv1d(32, 64, kernel_size=(1,), stride=(1,))
+  (4): InstanceNorm1d(64, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+  (5): ReLU()
+  (6): Conv1d(64, 128, kernel_size=(1,), stride=(1,))
+  (7): InstanceNorm1d(128, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+  (8): ReLU()
+  (9): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+)
+----------------------结束监视代码----------------------
+```
+也就是说，**关键点编码器构造的多层感知机是一个`<class 'torch.nn.modules.container.Sequential'>`类型的对象。这个多层感知机是把各个层封装到一个PyTorch官方的torch.nn.modules.container.Sequential容器对象里的。**
+**注意：PyTorch模型的构造方法，是一些标准的用法。以后我应该从各种优秀的开源代码中学习更多的PyTorch模型构造方法。一定要多从优秀的开源代码中学习人家的写法。**
+
+对于关键点编码器的构造函数中的最后一行代码`nn.init.constant_(self.encoder[-1].bias, 0.0)`，我们先来看看这行代码接受的输入。测试一下下述代码：
+``` python
+class KeypointEncoder(nn.Module):
+    """Joint encoding of visual appearance and location using MLPs"""
+
+    def __init__(self, feature_dim, layers):
+        super().__init__()
+        self.encoder = MLP([3] + layers + [feature_dim])
+
+        print("----------------------开始监视代码----------------------")
+        print("type(self.encoder[-1]): ", type(self.encoder[-1]))
+        print("----------------------我的分割线1----------------------")
+        print("self.encoder[-1]: ", self.encoder[-1])
+        print("----------------------我的分割线2----------------------")
+        print("type(self.encoder[-1].bias): ", type(self.encoder[-1].bias))
+        print("----------------------我的分割线3----------------------")
+        print("self.encoder[-1].bias.shape: ", self.encoder[-1].bias.shape)
+        print("----------------------我的分割线4----------------------")
+        print("self.encoder[-1].bias: ", self.encoder[-1].bias)
+        print("----------------------结束监视代码----------------------")
+        exit()
+        nn.init.constant_(self.encoder[-1].bias, 0.0)
+
+    def forward(self, kpts, scores):
+        inputs = [kpts.transpose(1, 2), scores.unsqueeze(1)]
+        return self.encoder(torch.cat(inputs, dim=1))
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(self.encoder[-1]):  <class 'torch.nn.modules.conv.Conv1d'>
+----------------------我的分割线1----------------------
+self.encoder[-1]:  Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+----------------------我的分割线2----------------------
+type(self.encoder[-1].bias):  <class 'torch.nn.parameter.Parameter'>
+----------------------我的分割线3----------------------
+self.encoder[-1].bias.shape:  torch.Size([128])
+----------------------我的分割线4----------------------
+self.encoder[-1].bias:  Parameter containing:
+tensor([-0.0591, -0.0655,  0.0222,  0.0279,  0.0781,  0.0686,  0.0114,  0.0864,
+        -0.0775,  0.0293, -0.0544, -0.0693,  0.0281,  0.0615, -0.0345,  0.0415,
+        -0.0357,  0.0082, -0.0797,  0.0467,  0.0745,  0.0516, -0.0690, -0.0045,
+        -0.0531, -0.0249, -0.0022,  0.0104, -0.0587,  0.0761, -0.0828, -0.0761,
+        -0.0333,  0.0600,  0.0014, -0.0308,  0.0073, -0.0569, -0.0606,  0.0245,
+        -0.0344,  0.0499, -0.0349, -0.0115,  0.0732,  0.0021,  0.0136, -0.0276,
+         0.0142,  0.0752, -0.0819, -0.0025, -0.0039, -0.0488,  0.0792,  0.0543,
+         0.0503, -0.0029,  0.0130,  0.0230, -0.0124,  0.0015, -0.0147, -0.0770,
+        -0.0381, -0.0581, -0.0088, -0.0647, -0.0734,  0.0272, -0.0413,  0.0119,
+         0.0235,  0.0637, -0.0675, -0.0612, -0.0053, -0.0862,  0.0288,  0.0509,
+        -0.0553, -0.0026, -0.0070, -0.0372,  0.0702, -0.0164,  0.0493,  0.0419,
+        -0.0856,  0.0406,  0.0706, -0.0471, -0.0618, -0.0161,  0.0274, -0.0190,
+        -0.0314, -0.0135,  0.0144, -0.0584,  0.0046, -0.0372, -0.0555, -0.0273,
+        -0.0446, -0.0420,  0.0170,  0.0041,  0.0579, -0.0584, -0.0369,  0.0492,
+         0.0435,  0.0286,  0.0281,  0.0033,  0.0798,  0.0518,  0.0857, -0.0634,
+        -0.0258,  0.0142,  0.0172,  0.0232,  0.0046,  0.0481,  0.0345, -0.0107],
+       requires_grad=True)
+----------------------结束监视代码----------------------
+```
+由此我们学到了：**对于PyTorch官方的`<class 'torch.nn.modules.container.Sequential'>`类型的模型结构，我们可以通过数组索引的方式来访问里面的每一个层。** 比如这里看到的，`self.encoder`是长这个样子的结构：
+```
+self.encoder:  Sequential(
+  (0): Conv1d(3, 32, kernel_size=(1,), stride=(1,))
+  (1): InstanceNorm1d(32, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+  (2): ReLU()
+  (3): Conv1d(32, 64, kernel_size=(1,), stride=(1,))
+  (4): InstanceNorm1d(64, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+  (5): ReLU()
+  (6): Conv1d(64, 128, kernel_size=(1,), stride=(1,))
+  (7): InstanceNorm1d(128, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+  (8): ReLU()
+  (9): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+)
+```
+self.encoder[-1]就是这个网络的最后一层，长这个样子：
+```
+self.encoder[-1]:  Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+```
+self.encoder[-1].bias就是这个最后一层的偏置，长这个样子：
+```
+type(self.encoder[-1].bias):  <class 'torch.nn.parameter.Parameter'>
+self.encoder[-1].bias.shape:  torch.Size([128])
+```
+**对于类似这样的PyTorch官方用法，一定要之后多看优秀的开源代码，逐渐熟悉和积累这些用法。**
+关于`nn.init.constant_`的用法，参见[torch.nn.init.constant_(tensor, val)官方文档](https://pytorch.org/docs/1.8.0/nn.init.html#torch.nn.init.constant_)可知，`torch.nn.init.constant_(tensor, val)`函数的作用是：用给定的值`val`来填充一个给定的PyTorch张量。我们来看看这个`torch.nn.init.constant_(tensor, val)`函数的执行效果。测试下述代码：
+``` python
+class KeypointEncoder(nn.Module):
+    """Joint encoding of visual appearance and location using MLPs"""
+
+    def __init__(self, feature_dim, layers):
+        super().__init__()
+        self.encoder = MLP([3] + layers + [feature_dim])
+
+        print("----------------------开始监视代码----------------------")
+        print("self.encoder[-1].bias.shape: ", self.encoder[-1].bias.shape)
+        print("----------------------我的分割线1----------------------")
+        print("self.encoder[-1].bias: ", self.encoder[-1].bias)
+        print("----------------------开始执行这行代码----------------------")
+
+        nn.init.constant_(self.encoder[-1].bias, 0.0)
+
+        print("----------------------结束执行这行代码----------------------")
+        print("self.encoder[-1].bias.shape: ", self.encoder[-1].bias.shape)
+        print("----------------------我的分割线2----------------------")
+        print("self.encoder[-1].bias: ", self.encoder[-1].bias)
+        print("----------------------结束监视代码----------------------")
+        exit()
+
+    def forward(self, kpts, scores):
+        inputs = [kpts.transpose(1, 2), scores.unsqueeze(1)]
+        return self.encoder(torch.cat(inputs, dim=1))
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+self.encoder[-1].bias.shape:  torch.Size([128])
+----------------------我的分割线1----------------------
+self.encoder[-1].bias:  Parameter containing:
+tensor([ 0.0805, -0.0722, -0.0326,  0.0694,  0.0372,  0.0200,  0.0475,  0.0758,
+        -0.0446,  0.0182, -0.0410,  0.0441,  0.0542, -0.0691, -0.0274, -0.0563,
+         0.0345,  0.0773,  0.0312, -0.0380,  0.0662, -0.0425,  0.0333,  0.0199,
+         0.0876,  0.0610,  0.0381,  0.0100, -0.0225,  0.0839,  0.0513,  0.0743,
+        -0.0631, -0.0577, -0.0754, -0.0680, -0.0463, -0.0467, -0.0809, -0.0845,
+        -0.0004, -0.0380, -0.0017,  0.0847,  0.0584, -0.0241,  0.0489, -0.0427,
+         0.0806, -0.0480,  0.0674, -0.0574, -0.0672, -0.0092, -0.0186, -0.0164,
+        -0.0866,  0.0361,  0.0045,  0.0760, -0.0214,  0.0707,  0.0400,  0.0605,
+         0.0259, -0.0211, -0.0011,  0.0588,  0.0033, -0.0072, -0.0475, -0.0436,
+        -0.0615,  0.0440,  0.0564, -0.0105,  0.0430, -0.0397,  0.0611, -0.0669,
+        -0.0360,  0.0507,  0.0870,  0.0136,  0.0408,  0.0573, -0.0797,  0.0333,
+        -0.0769,  0.0482,  0.0428,  0.0876, -0.0671, -0.0130, -0.0715, -0.0033,
+        -0.0634, -0.0046, -0.0529, -0.0796, -0.0326, -0.0204,  0.0215, -0.0281,
+         0.0558,  0.0393, -0.0385,  0.0041, -0.0654,  0.0229, -0.0112,  0.0201,
+        -0.0191,  0.0215,  0.0067, -0.0664,  0.0883, -0.0541, -0.0795, -0.0317,
+        -0.0823,  0.0878, -0.0100,  0.0488, -0.0094,  0.0046,  0.0092,  0.0663],
+       requires_grad=True)
+----------------------开始执行这行代码----------------------
+----------------------结束执行这行代码----------------------
+self.encoder[-1].bias.shape:  torch.Size([128])
+----------------------我的分割线2----------------------
+self.encoder[-1].bias:  Parameter containing:
+tensor([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+        0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+        0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+        0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+        0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+        0., 0., 0., 0., 0., 0., 0., 0.], requires_grad=True)
+----------------------结束监视代码----------------------
+```
+可以看到，**`torch.nn.init.constant_(tensor, val)`函数的作用就是：将`tensor`张量中的所有值都设为`val`，不改变`tensor`张量的形状。** 至于为什么需要把关键点编码器的最后一层的偏置设为0，这个我目前还不是很清楚。之后再研究。
+由于现在还不涉及到使用SuperGlue模型进行推理的过程，因此，我暂时先略过模型的`def forward()`函数。之后等用到模型推理的时候，再来分析模型的`def forward()`函数。
+
