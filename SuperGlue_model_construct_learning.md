@@ -1,5 +1,5 @@
-# SuperGlue模型部分的代码学习
-在这个笔记中，我将逐行阅读[SuperGlue模型部分的代码](https://github.com/HeatherJiaZG/SuperGlue-pytorch/blob/master/models/superglue.py)，弄懂SuperGlue模型究竟是怎么实现的。
+# SuperGlue模型构造部分的代码学习
+在这个笔记中，我将逐行阅读[SuperGlue模型构造部分的代码](https://github.com/HeatherJiaZG/SuperGlue-pytorch/blob/master/models/superglue.py)，弄懂SuperGlue模型究竟是怎么实现的。
 
 ## 从训练脚本中进入模型部分的代码——模型构造
 在[SuperGlue的第三方训练脚本](https://github.com/HeatherJiaZG/SuperGlue-pytorch/blob/master/train.py)`/SuperGlue-pytorch/train.py`中，可以看到这样的几行代码（注意：我的代码经过了Python第三方包black的强制格式化，所以与Github上原始作者的代码格式不同。）：
@@ -1061,6 +1061,513 @@ type(self.config["GNN_layers"]):  <class 'list'>
 self.config["GNN_layers"]:  ['self', 'cross', 'self', 'cross', 'self', 'cross', 'self', 'cross', 'self', 'cross', 'self', 'cross', 'self', 'cross', 'self', 'cross', 'self', 'cross']
 ----------------------结束监视代码----------------------
 ```
-构造SuperGlue网络使用的这个`self.config`字典之前已经打印出来了。这里就是用这个字典中的两个键`"descriptor_dim"`和`"GNN_layers"`的值来构造SuperGlue网络最关键的层：基于注意力机制的图神经网络层`self.gnn`。
+构造SuperGlue网络使用的这个`self.config`字典之前已经打印出来了。这里就是用这个字典中的两个键`"descriptor_dim"`和`"GNN_layers"`的值来构造SuperGlue网络最关键的层：基于注意力机制的图神经网络层`self.gnn`。注意：参数`"GNN_layers"`由9个`'self' 'cross'`交替构成。因此，`"GNN_layers"`数组的长度是18。这个`"GNN_layers"`参数的具体含义之后看完`AttentionalGNN`类的构造函数的代码再来分析。
 
-接下来我们进入`AttentionalGNN`类的代码，
+接下来我们进入`AttentionalGNN`类的代码，仔细地看一下这个基于注意力机制的图神经网络层`self.gnn`是怎么构造出来的。`/SuperGlue-pytorch/models/superglue.py`脚本里的`AttentionalGNN`类的完整代码如下：
+``` python
+class AttentionalGNN(nn.Module):
+    def __init__(self, feature_dim: int, layer_names: list):
+        super().__init__()
+        self.layers = nn.ModuleList(
+            [AttentionalPropagation(feature_dim, 4) for _ in range(len(layer_names))]
+        )
+        self.names = layer_names
+
+    def forward(self, desc0, desc1):
+        for layer, name in zip(self.layers, self.names):
+            layer.attn.prob = []
+            if name == "cross":
+                src0, src1 = desc1, desc0
+            else:  # if name == 'self':
+                src0, src1 = desc0, desc1
+            delta0, delta1 = layer(desc0, src0), layer(desc1, src1)
+            desc0, desc1 = (desc0 + delta0), (desc1 + delta1)
+        return desc0, desc1
+```
+经过对比，第三方训练代码使用的`AttentionalGNN`类的代码和SuperGlue官方的`AttentionalGNN`类的代码完全一样（当然，内部使用的其他的类的代码可能会不一样，不过之后再来分析）。我们来仔细地分析一下`AttentionalGNN`类的实例的构造细节。`AttentionalGNN`类的构造函数的完整代码是：
+``` python
+class AttentionalGNN(nn.Module):
+    def __init__(self, feature_dim: int, layer_names: list):
+        super().__init__()
+        self.layers = nn.ModuleList(
+            [AttentionalPropagation(feature_dim, 4) for _ in range(len(layer_names))]
+        )
+        self.names = layer_names
+```
+`AttentionalGNN`类的构造函数一共有三行代码。其中第一行`super().__init__()`和第三行`self.names = layer_names`没有什么可说的，我们只需要仔细看看第二行代码：
+``` python
+self.layers = nn.ModuleList(
+    [AttentionalPropagation(feature_dim, 4) for _ in range(len(layer_names))]
+)
+```
+[PyTorch官方torch.nn.ModuleList文档](https://pytorch.org/docs/1.8.0/generated/torch.nn.ModuleList.html#torch.nn.ModuleList)对`torch.nn.ModuleList()`函数的功能的描述是：将网络的子模块保存在一个ModuleList列表中，这个ModuleList列表可以像普通的Python列表一样被索引，但是它所包含的模块能够被正确地注册，并且将被所有的Module方法所看到。这段官方文档的描述还是有点读起来拗口，不好理解。我们先来看看这个`torch.nn.ModuleList()`函数构造的列表长什么样子。测试下述代码：
+``` python
+class AttentionalGNN(nn.Module):
+    def __init__(self, feature_dim: int, layer_names: list):
+        super().__init__()
+        self.layers = nn.ModuleList(
+            [AttentionalPropagation(feature_dim, 4) for _ in range(len(layer_names))]
+        )
+        print("----------------------开始监视代码----------------------")
+        print("type(self.layers): ", type(self.layers))
+        print("----------------------我的分割线1----------------------")
+        print("self.layers: ", self.layers)
+        print("----------------------结束监视代码----------------------")
+        exit()
+        self.names = layer_names
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(self.layers):  <class 'torch.nn.modules.container.ModuleList'>
+----------------------我的分割线1----------------------
+self.layers:  ModuleList(
+  (0): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (1): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (2): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (3): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (4): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (5): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (6): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (7): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (8): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (9): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (10): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (11): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (12): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (13): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (14): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (15): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (16): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (17): AttentionalPropagation(
+    (attn): MultiHeadedAttention(
+      (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (proj): ModuleList(
+        (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      )
+    )
+    (mlp): Sequential(
+      (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+      (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+      (2): ReLU()
+      (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+)
+----------------------结束监视代码----------------------
+```
+由此就明白了：SuperGlue网络的第二个关键模块——基于注意力机制的图神经网络层`self.gnn`，是由18个完全一样的`AttentionalPropagation`类的实例构成的。这18个完全一样的网络模块都是`AttentionalPropagation(feature_dim, 4)`样子的，并且这18个完全一样的网络模块都被组织到了一个`torch.nn.ModuleList()`类型的列表中，方便以后的调用。
+
+我们来看一看这18个完全一样的`AttentionalPropagation(feature_dim, 4)`网络模块长什么样子（在本次训练中，`feature_dim`的值是`128`）。测试下述代码：
+``` python
+class AttentionalGNN(nn.Module):
+    def __init__(self, feature_dim: int, layer_names: list):
+        super().__init__()
+        print("----------------------开始监视代码----------------------")
+        print(
+            "type(AttentionalPropagation(feature_dim, 4)): ",
+            type(AttentionalPropagation(feature_dim, 4)),
+        )
+        print("----------------------我的分割线1----------------------")
+        print(
+            "AttentionalPropagation(feature_dim, 4): ",
+            AttentionalPropagation(feature_dim, 4),
+        )
+        print("----------------------结束监视代码----------------------")
+        exit()
+        self.layers = nn.ModuleList(
+            [AttentionalPropagation(feature_dim, 4) for _ in range(len(layer_names))]
+        )
+        self.names = layer_names
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(AttentionalPropagation(feature_dim, 4)):  <class 'models.superglue.AttentionalPropagation'>
+----------------------我的分割线1----------------------
+AttentionalPropagation(feature_dim, 4):  AttentionalPropagation(
+  (attn): MultiHeadedAttention(
+    (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+    (proj): ModuleList(
+      (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+      (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+    )
+  )
+  (mlp): Sequential(
+    (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+    (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+    (2): ReLU()
+    (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+  )
+)
+----------------------结束监视代码----------------------
+```
+可以看到，`AttentionalPropagation(feature_dim, 4)`网络模块由两个部分组成：一个多头注意力机制层（这个多头注意力机制层是`MultiHeadedAttention`类的实例）和一个多层感知机MLP。我们接下来仔细看看`AttentionalPropagation(feature_dim, 4)`网络模块的两个子模块的网络细节。
+
+我们利用vscode的定义跳转功能，进入到`AttentionalPropagation`类的代码里面，看看这个类长什么样子。`AttentionalPropagation`类的完整代码如下（位于`/SuperGlue-pytorch/models/superglue.py`里）：
+``` python
+class AttentionalPropagation(nn.Module):
+    def __init__(self, feature_dim: int, num_heads: int):
+        super().__init__()
+        self.attn = MultiHeadedAttention(num_heads, feature_dim)
+        self.mlp = MLP([feature_dim * 2, feature_dim * 2, feature_dim])
+        nn.init.constant_(self.mlp[-1].bias, 0.0)
+
+    def forward(self, x, source):
+        message = self.attn(x, source, source)
+        return self.mlp(torch.cat([x, message], dim=1))
+```
+经过对比，第三方训练脚本使用的`AttentionalPropagation`类的代码和SuperGlue官方使用的`AttentionalPropagation`类的代码完全一样。
+`AttentionalPropagation`类的构造函数就做了三件事情：
+1. 构造了一个多头注意力机制层`self.attn = MultiHeadedAttention(num_heads, feature_dim)`
+2. 构造了一个多层感知机MLP`self.mlp = MLP([feature_dim * 2, feature_dim * 2, feature_dim])`
+3. 将多层感知机MLP的最后一层的偏置设为0`nn.init.constant_(self.mlp[-1].bias, 0.0)`
+
+接下来我们一个一个来看这些操作。
+
+首先，注意力传播模块`AttentionalPropagation`构造了一个多头注意力机制层`self.attn`，这个多头注意力机制层是`MultiHeadedAttention`类的实例。传入`MultiHeadedAttention`类的构造函数的两个参数分别是：头的数量`num_heads`（本次测试中为4）、特征维度`feature_dim`（本次测试中为128）。我们来看看这个多头注意力机制层`self.attn`长什么样子。测试下述代码：
+``` python
+class AttentionalPropagation(nn.Module):
+    def __init__(self, feature_dim: int, num_heads: int):
+        super().__init__()
+        self.attn = MultiHeadedAttention(num_heads, feature_dim)
+        print("----------------------开始监视代码----------------------")
+        print("type(self.attn): ", type(self.attn))
+        print("----------------------我的分割线1----------------------")
+        print("self.attn: ", self.attn)
+        print("----------------------结束监视代码----------------------")
+        exit()
+        self.mlp = MLP([feature_dim * 2, feature_dim * 2, feature_dim])
+        nn.init.constant_(self.mlp[-1].bias, 0.0)
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(self.attn):  <class 'models.superglue.MultiHeadedAttention'>
+----------------------我的分割线1----------------------
+self.attn:  MultiHeadedAttention(
+  (merge): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+  (proj): ModuleList(
+    (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+    (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+    (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+  )
+)
+----------------------结束监视代码----------------------
+```
+可以看到，本次测试中，构造的4头注意力机制层`self.attn`模块里包含了一些1维卷积操作。稍后我们再来详细分析多头注意力机制层的原理和它的代码实现。
+
+其次，注意力传播模块`AttentionalPropagation`构造了一个多层感知机MLP的层`self.mlp`。这个多层感知机层没有什么特别之处，之前已经分析过了。我们在这里，只需要看一下它长什么样子即可。测试下述代码：
+``` python
+class AttentionalPropagation(nn.Module):
+    def __init__(self, feature_dim: int, num_heads: int):
+        super().__init__()
+        self.attn = MultiHeadedAttention(num_heads, feature_dim)
+        self.mlp = MLP([feature_dim * 2, feature_dim * 2, feature_dim])
+        print("----------------------开始监视代码----------------------")
+        print("type(self.mlp): ", type(self.mlp))
+        print("----------------------我的分割线1----------------------")
+        print("self.mlp: ", self.mlp)
+        print("----------------------结束监视代码----------------------")
+        exit()
+        nn.init.constant_(self.mlp[-1].bias, 0.0)
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(self.mlp):  <class 'torch.nn.modules.container.Sequential'>
+----------------------我的分割线1----------------------
+self.mlp:  Sequential(
+  (0): Conv1d(256, 256, kernel_size=(1,), stride=(1,))
+  (1): InstanceNorm1d(256, eps=1e-05, momentum=0.1, affine=False, track_running_stats=False)
+  (2): ReLU()
+  (3): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+)
+----------------------结束监视代码----------------------
+```
+这个多层感知机MLP层只有4个组件，分别是：1维卷积、实例归一化、ReLU()和1维卷积这四个层。
+
+最后，注意力传播模块`AttentionalPropagation`将多层感知机`self.mlp`的最后一层的偏置设为0。这一行代码的用法之前已经分析过了，此处不再赘述。
+
+接下来，我们深入到多头注意力机制层`self.attn`里面，详细地看看多头注意力机制是怎么用代码来实现的。我们利用vscode的定义跳转功能，进入到`MultiHeadedAttention`类的代码里。`MultiHeadedAttention`类的完整代码如下：
+``` python
+class MultiHeadedAttention(nn.Module):
+    """Multi-head attention to increase model expressivitiy"""
+
+    def __init__(self, num_heads: int, d_model: int):
+        super().__init__()
+        assert d_model % num_heads == 0
+        self.dim = d_model // num_heads
+        self.num_heads = num_heads
+        self.merge = nn.Conv1d(d_model, d_model, kernel_size=1)
+        self.proj = nn.ModuleList([deepcopy(self.merge) for _ in range(3)])
+
+    def forward(self, query, key, value):
+        batch_dim = query.size(0)
+        query, key, value = [
+            l(x).view(batch_dim, self.dim, self.num_heads, -1)
+            for l, x in zip(self.proj, (query, key, value))
+        ]
+        x, prob = attention(query, key, value)
+        self.prob.append(prob)
+        return self.merge(x.contiguous().view(batch_dim, self.dim * self.num_heads, -1))
+```
+经过对比，第三方训练脚本使用的`MultiHeadedAttention`类的构造函数的代码与SuperGlue官方发布的`MultiHeadedAttention`类的构造函数的代码完全一样，但是第三方训练脚本使用的`MultiHeadedAttention`类的推理函数`forward()`的代码与SuperGlue官方发布的`MultiHeadedAttention`类的推理函数`forward()`的代码不完全一样。之后在研究模型的推理代码时，我们再来详细分析这些差异。
