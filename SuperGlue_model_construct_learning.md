@@ -1571,3 +1571,138 @@ class MultiHeadedAttention(nn.Module):
         return self.merge(x.contiguous().view(batch_dim, self.dim * self.num_heads, -1))
 ```
 经过对比，第三方训练脚本使用的`MultiHeadedAttention`类的构造函数的代码与SuperGlue官方发布的`MultiHeadedAttention`类的构造函数的代码完全一样，但是第三方训练脚本使用的`MultiHeadedAttention`类的推理函数`forward()`的代码与SuperGlue官方发布的`MultiHeadedAttention`类的推理函数`forward()`的代码不完全一样。之后在研究模型的推理代码时，我们再来详细分析这些差异。
+
+接下来我们逐行分析`MultiHeadedAttention`类的构造函数的代码，仔细弄懂多头注意力机制的代码实现。
+首先，如前所述，`self.attn = MultiHeadedAttention(num_heads, feature_dim)`这行代码中，头的数量`num_heads`在本次测试中为4，特征维度`feature_dim`在本次测试中为128。我们来测试下述代码：
+``` python
+class MultiHeadedAttention(nn.Module):
+    """Multi-head attention to increase model expressivitiy"""
+
+    def __init__(self, num_heads: int, d_model: int):
+        super().__init__()
+        assert d_model % num_heads == 0
+        self.dim = d_model // num_heads
+        self.num_heads = num_heads
+        print("----------------------开始监视代码----------------------")
+        print("self.dim: ", self.dim)
+        print("----------------------我的分割线1----------------------")
+        print("self.num_heads: ", self.num_heads)
+        print("----------------------结束监视代码----------------------")
+        exit()
+        self.merge = nn.Conv1d(d_model, d_model, kernel_size=1)
+        self.proj = nn.ModuleList([deepcopy(self.merge) for _ in range(3)])
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+self.dim:  32
+----------------------我的分割线1----------------------
+self.num_heads:  4
+----------------------结束监视代码----------------------
+```
+这里的两个参数`self.dim`和`self.num_heads`的含义，在之后的代码中再详细分析。
+
+接下来的一行代码`self.merge = nn.Conv1d(d_model, d_model, kernel_size=1)`的含义是很清楚的，就是构造了一个1维卷积的模块。我们来看一下这个模块长什么样。测试下述代码：
+``` python
+class MultiHeadedAttention(nn.Module):
+    """Multi-head attention to increase model expressivitiy"""
+
+    def __init__(self, num_heads: int, d_model: int):
+        super().__init__()
+        assert d_model % num_heads == 0
+        self.dim = d_model // num_heads
+        self.num_heads = num_heads
+        self.merge = nn.Conv1d(d_model, d_model, kernel_size=1)
+        print("----------------------开始监视代码----------------------")
+        print("type(self.merge): ", type(self.merge))
+        print("----------------------我的分割线1----------------------")
+        print("self.merge: ", self.merge)
+        print("----------------------结束监视代码----------------------")
+        exit()
+        self.proj = nn.ModuleList([deepcopy(self.merge) for _ in range(3)])
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(self.merge):  <class 'torch.nn.modules.conv.Conv1d'>
+----------------------我的分割线1----------------------
+self.merge:  Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+----------------------结束监视代码----------------------
+```
+这就是一个普通的1维卷积，没有什么特别之处。
+最后，对`self.proj = nn.ModuleList([deepcopy(self.merge) for _ in range(3)])`这行代码，我们首先查阅[Python3.8官方deepcopy()函数文档](https://docs.python.org/3.8/library/copy.html#copy.deepcopy)得知，Python3.8的官方函数deepcopy()是对一个Python对象执行深度拷贝操作。从[Python中copy,deepcopy之深拷贝浅拷贝使用详解](https://blog.csdn.net/qq_26442553/article/details/82218403)得知，**浅拷贝和深拷贝的区别是：浅拷贝只是将原对象在内存中的引用地址拷贝过来了，让新的对象指向这个地址。而深拷贝是将这个对象的所有内容遍历拷贝过来了，相当于跟原来的对象没关系了，所以如果这时候修改原来对象的值，新对象不会随之更改。**
+我们来试运行下述代码：
+``` python
+class MultiHeadedAttention(nn.Module):
+    """Multi-head attention to increase model expressivitiy"""
+
+    def __init__(self, num_heads: int, d_model: int):
+        super().__init__()
+        assert d_model % num_heads == 0
+        self.dim = d_model // num_heads
+        self.num_heads = num_heads
+        self.merge = nn.Conv1d(d_model, d_model, kernel_size=1)
+        print("----------------------开始监视代码----------------------")
+        print("type(deepcopy(self.merge)): ", type(deepcopy(self.merge)))
+        print("----------------------我的分割线1----------------------")
+        print("deepcopy(self.merge): ", deepcopy(self.merge))
+        print("----------------------我的分割线2----------------------")
+        print("type(self.merge): ", type(self.merge))
+        print("----------------------我的分割线3----------------------")
+        print("self.merge: ", self.merge)
+        print("----------------------我的分割线4----------------------")
+        print("self.merge==deepcopy(self.merge): ", self.merge == deepcopy(self.merge))
+        print("----------------------结束监视代码----------------------")
+        exit()
+        self.proj = nn.ModuleList([deepcopy(self.merge) for _ in range(3)])
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(deepcopy(self.merge)):  <class 'torch.nn.modules.conv.Conv1d'>
+----------------------我的分割线1----------------------
+deepcopy(self.merge):  Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+----------------------我的分割线2----------------------
+type(self.merge):  <class 'torch.nn.modules.conv.Conv1d'>
+----------------------我的分割线3----------------------
+self.merge:  Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+----------------------我的分割线4----------------------
+self.merge==deepcopy(self.merge):  False
+----------------------结束监视代码----------------------
+```
+由此我们就明白了：**Python3.8的内置函数`deepcopy()`函数会创建一个对象的一个新的完整副本。这个新的完整副本不同于原始的对象。**
+
+最后我们来看一下`self.proj = nn.ModuleList([deepcopy(self.merge) for _ in range(3)])`这行代码构造的`self.proj`对象长什么样子。测试下述代码：
+``` python
+class MultiHeadedAttention(nn.Module):
+    """Multi-head attention to increase model expressivitiy"""
+
+    def __init__(self, num_heads: int, d_model: int):
+        super().__init__()
+        assert d_model % num_heads == 0
+        self.dim = d_model // num_heads
+        self.num_heads = num_heads
+        self.merge = nn.Conv1d(d_model, d_model, kernel_size=1)
+        self.proj = nn.ModuleList([deepcopy(self.merge) for _ in range(3)])
+        print("----------------------开始监视代码----------------------")
+        print("type(self.proj): ", type(self.proj))
+        print("----------------------我的分割线1----------------------")
+        print("self.proj: ", self.proj)
+        print("----------------------结束监视代码----------------------")
+        exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(self.proj):  <class 'torch.nn.modules.container.ModuleList'>
+----------------------我的分割线1----------------------
+self.proj:  ModuleList(
+  (0): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+  (1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+  (2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+)
+----------------------结束监视代码----------------------
+```
+由此可知：`self.proj`对象就是一个由3个1维卷积堆叠的网络层。
+
+我们还需要探讨一下，为什么多头注意力机制层是这么来实现的。此时我们需要从论文中学习一下多头注意力机制的相关知识。
