@@ -1707,4 +1707,77 @@ self.proj:  ModuleList(
 
 我们还需要探讨一下，为什么多头注意力机制层是这么来实现的。此时我们需要从论文中学习一下多头注意力机制的相关知识。但是这一步此时我暂且先不做，之后更多地看一些优秀的开源代码，再慢慢把这一点搞懂。
 
-至此，SuperGlue网络模型的构造部分的代码就分析完毕了。
+至此，第三方训练脚本使用的SuperGlue模型类的初始化函数__init__(self, config)的第4行代码
+``` python
+self.gnn = AttentionalGNN(
+    self.config["descriptor_dim"], self.config["GNN_layers"]
+)
+```
+就分析完毕了。
+
+---
+第三方训练脚本使用的SuperGlue模型类的初始化函数__init__(self, config)的第5行代码如下：
+``` python
+self.final_proj = nn.Conv1d(
+    self.config["descriptor_dim"],
+    self.config["descriptor_dim"],
+    kernel_size=1,
+    bias=True,
+)
+```
+这一行代码没有任何可说的，就是一个普通的一维卷积而已。我们直接看一下这个`self.final_proj`层长什么样。测试下述代码：
+``` python
+self.final_proj = nn.Conv1d(
+    self.config["descriptor_dim"],
+    self.config["descriptor_dim"],
+    kernel_size=1,
+    bias=True,
+)
+print("----------------------开始监视代码----------------------")
+print("type(self.final_proj): ", type(self.final_proj))
+print("----------------------我的分割线1----------------------")
+print("self.final_proj: ", self.final_proj)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(self.final_proj):  <class 'torch.nn.modules.conv.Conv1d'>
+----------------------我的分割线1----------------------
+self.final_proj:  Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+----------------------结束监视代码----------------------
+```
+这就是一个普通的PyTorch 1维卷积模块，没有任何可说的。
+
+---
+第三方训练脚本使用的SuperGlue模型类的初始化函数__init__(self, config)的第6-7行代码如下：
+``` python
+bin_score = torch.nn.Parameter(torch.tensor(1.0))
+self.register_parameter("bin_score", bin_score)
+```
+这两行代码和参数的构造有关。参考[PyTorch官方torch.nn.parameter.Parameter文档](https://pytorch.org/docs/1.8.0/generated/torch.nn.parameter.Parameter.html#torch.nn.parameter.Parameter)可知，`torch.nn.Parameter`类的实例是PyTorch模块的参数。我们来看看这个参数长什么样子。测试下述代码：
+``` python
+bin_score = torch.nn.Parameter(torch.tensor(1.0))
+print("----------------------开始监视代码----------------------")
+print("type(bin_score): ", type(bin_score))
+print("----------------------我的分割线1----------------------")
+print("bin_score: ", bin_score)
+print("----------------------结束监视代码----------------------")
+exit()
+self.register_parameter("bin_score", bin_score)
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+type(bin_score):  <class 'torch.nn.parameter.Parameter'>
+----------------------我的分割线1----------------------
+bin_score:  Parameter containing:
+tensor(1., requires_grad=True)
+----------------------结束监视代码----------------------
+```
+这就是一个PyTorch参数对象。之后要怎么用，之后再说。
+
+对于下一行代码`self.register_parameter("bin_score", bin_score)`，参考[PyTorch官方torch.nn.Module.register_parameter文档](https://pytorch.org/docs/1.8.0/generated/torch.nn.Module.html#torch.nn.Module.register_parameter)可知，`self.register_parameter`函数是PyTorch官方模块类`torch.nn.Module`定义的函数。这里SuperGlue网络直接调用了父类定义的函数。`torch.nn.Module.register_parameter()`函数的作用是：将一个参数添加到模型中。这行代码将一个名为`"bin_score"`的参数添加到了SuperGlue模型中。这个参数之后要怎么用，在之后的推理代码部分再详细分析。
+
+至此，第三方训练脚本使用的SuperGlue模型类的初始化函数__init__(self, config)的代码就分析完毕了。接下来我们来分析第三方训练脚本使用的SuperGlue模型类的前向传播函数forward(self, data)的代码。
