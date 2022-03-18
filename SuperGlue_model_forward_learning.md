@@ -284,3 +284,156 @@ desc0.shape:  torch.Size([1, 128, 10])
 ----------------------结束监视代码----------------------
 ```
 由此可知：对PyTorch张量执行`.transpose(0, 1)`变换，就是把前两个维度进行交换。
+
+---
+SuperGlue网络的前向传播函数forward(self, data)的第5-6行代码如下：
+``` python
+kpts0 = torch.reshape(kpts0, (1, -1, 2))
+kpts1 = torch.reshape(kpts1, (1, -1, 2))
+```
+这两行代码对关键点张量的形状做了一个简单的变换。我们来看一下变换之前的关键点张量的形状。测试下述代码：
+``` python
+print("----------------------开始监视代码----------------------")
+print("变换之前的kpts0.shape: ", kpts0.shape)
+print("变换之前的kpts1.shape: ", kpts1.shape)
+print("----------------------开始执行这两行代码----------------------")
+kpts0 = torch.reshape(kpts0, (1, -1, 2))
+kpts1 = torch.reshape(kpts1, (1, -1, 2))
+print("----------------------结束执行这两行代码----------------------")
+print("变换之后的kpts0.shape: ", kpts0.shape)
+print("变换之后的kpts1.shape: ", kpts1.shape)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+变换之前的kpts0.shape:  torch.Size([1, 1, 10, 2])
+变换之前的kpts1.shape:  torch.Size([1, 1, 10, 2])
+----------------------开始执行这两行代码----------------------
+----------------------结束执行这两行代码----------------------
+变换之后的kpts0.shape:  torch.Size([1, 10, 2])
+变换之后的kpts1.shape:  torch.Size([1, 10, 2])
+----------------------结束监视代码----------------------
+```
+由此就一目了然了：这里仅仅是对关键点张量的维数做了一个精简而已。没有任何实质性的变化。
+
+---
+SuperGlue网络的前向传播函数forward(self, data)的第7-9行代码如下：
+``` python
+if kpts0.shape[1] == 0 or kpts1.shape[1] == 0:  # no keypoints
+    shape0, shape1 = kpts0.shape[:-1], kpts1.shape[:-1]
+    return {
+        "matches0": kpts0.new_full(shape0, -1, dtype=torch.int)[0],
+        "matches1": kpts1.new_full(shape1, -1, dtype=torch.int)[0],
+        "matching_scores0": kpts0.new_zeros(shape0)[0],
+        "matching_scores1": kpts1.new_zeros(shape1)[0],
+        "skip_train": True,
+    }
+```
+这个if语句的含义在于：如果原始图像和经过透视变换后的图像中有任何一个没有关键点，则直接返回一个空的分数值，并且使这对图像不参与训练。在本次测试中，本次的这一对图像不会进入这个if语句来执行。
+
+
+---
+SuperGlue网络的前向传播函数forward(self, data)的第10行代码如下：
+``` python
+file_name = data["file_name"]
+```
+这行代码仅仅是把文件名保存在一个名为`file_name`的变量中。这行代码没有任何可说的。
+
+
+---
+SuperGlue网络的前向传播函数forward(self, data)的第11行代码如下：
+``` python
+all_matches = data["all_matches"].permute(
+    1, 2, 0
+)  # shape=torch.Size([1, 87, 2])
+```
+这行代码的功能是：对`data["all_matches"]`这个PyTorch张量执行形状变换。参见[PyTorch官方torch.Tensor.permute()函数文档](https://pytorch.org/docs/1.8.0/tensors.html#torch.Tensor.permute)。我们来看一下变换之前的形状和变换之后的形状。测试下述代码：
+``` python
+print("----------------------开始监视代码----------------------")
+print('变换之前的data["all_matches"].shape: ', data["all_matches"].shape)
+print("----------------------开始执行这行代码----------------------")
+all_matches = data["all_matches"].permute(
+    1, 2, 0
+)  # shape=torch.Size([1, 87, 2])
+print("----------------------结束执行这行代码----------------------")
+print("变换之后的all_matches.shape: ", all_matches.shape)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+变换之前的data["all_matches"].shape:  torch.Size([2, 1, 15])
+----------------------开始执行这行代码----------------------
+----------------------结束执行这行代码----------------------
+变换之后的all_matches.shape:  torch.Size([1, 15, 2])
+----------------------结束监视代码----------------------
+```
+这行代码的关键就是`torch.Tensor.permute()`函数的基本用法，参见[PyTorch官方torch.Tensor.permute()函数文档](https://pytorch.org/docs/1.8.0/tensors.html#torch.Tensor.permute)。这行代码其实没有什么关键难点。
+
+---
+SuperGlue网络的前向传播函数forward(self, data)的第12-13行代码如下：
+``` python
+kpts0 = normalize_keypoints(kpts0, data["image0"].shape)
+kpts1 = normalize_keypoints(kpts1, data["image1"].shape)
+```
+这两行代码的关键是`normalize_keypoints()`函数。`normalize_keypoints()`函数的完整代码如下：
+``` python
+def normalize_keypoints(kpts, image_shape):
+    """Normalize keypoints locations based on image image_shape"""
+    _, _, height, width = image_shape
+    one = kpts.new_tensor(1)
+    size = torch.stack([one * width, one * height])[None]
+    center = size / 2
+    scaling = size.max(1, keepdim=True).values * 0.7
+    return (kpts - center[:, None, :]) / scaling[:, None, :]
+```
+我现在暂且先不深入研究这个函数的代码。我们来看一下经过正规化的关键点长什么样子。测试下述代码：
+``` python
+# Keypoint normalization.
+print("----------------------开始监视代码----------------------")
+print("变换之前的kpts0.shape: ", kpts0.shape)
+print("----------------------我的分割线1----------------------")
+print("变换之前的kpts0: ", kpts0)
+print("----------------------开始执行这行代码----------------------")
+kpts0 = normalize_keypoints(kpts0, data["image0"].shape)
+print("----------------------结束执行这行代码----------------------")
+print("变换之后的kpts0.shape: ", kpts0.shape)
+print("----------------------我的分割线2----------------------")
+print("变换之后的kpts0: ", kpts0)
+print("----------------------结束监视代码----------------------")
+exit()
+```
+结果为：
+```
+----------------------开始监视代码----------------------
+变换之前的kpts0.shape:  torch.Size([1, 10, 2])
+----------------------我的分割线1----------------------
+变换之前的kpts0:  tensor([[[292.1921, 274.2129],
+         [304.4119, 240.1659],
+         [288.9746, 211.0905],
+         [318.2191, 288.2177],
+         [304.4119, 240.1659],
+         [292.1921, 274.2129],
+         [319.9964, 236.5881],
+         [317.0380, 254.6926],
+         [319.9964, 236.5881],
+         [204.5918, 187.1503]]], device='cuda:0', dtype=torch.float64)
+----------------------开始执行这行代码----------------------
+----------------------结束执行这行代码----------------------
+变换之后的kpts0.shape:  torch.Size([1, 10, 2])
+----------------------我的分割线2----------------------
+变换之后的kpts0:  tensor([[[-6.2071e-02,  1.3552e-01],
+         [-3.4795e-02,  5.9522e-02],
+         [-6.9253e-02, -5.3783e-03],
+         [-3.9752e-03,  1.6678e-01],
+         [-3.4795e-02,  5.9522e-02],
+         [-6.2071e-02,  1.3552e-01],
+         [-8.0381e-06,  5.1536e-02],
+         [-6.6116e-03,  9.1948e-02],
+         [-8.0381e-06,  5.1536e-02],
+         [-2.5761e-01, -5.8816e-02]]], device='cuda:0', dtype=torch.float64)
+----------------------结束监视代码----------------------
+```
